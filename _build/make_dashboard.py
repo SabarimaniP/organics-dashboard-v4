@@ -134,14 +134,14 @@ ol.findlist li::before{content:counter(f);font-weight:700;color:var(--navy2);fon
 </nav>
 
 <section class="panelbox on" id="p-ov">
-  <div class="panel"><h2>Combined — cohort + rolling — <span class="pn"></span></h2>
-    <div class="cardfilt" id="cfB"></div><div id="fnlB"></div></div>
   <div class="two">
-    <div class="panel"><h2>Cohort funnel — <span class="pn"></span></h2>
-      <div class="cardfilt" id="cfC"></div><div id="fnlC"></div></div>
     <div class="panel"><h2>Rolling funnel — <span class="pn"></span></h2>
       <div class="cardfilt" id="cfR"></div><div id="fnlR"></div></div>
+    <div class="panel"><h2>Cohort funnel — <span class="pn"></span></h2>
+      <div class="cardfilt" id="cfC"></div><div id="fnlC"></div></div>
   </div>
+  <div class="panel"><h2>Combined — cohort + rolling — <span class="pn"></span></h2>
+    <div class="cardfilt" id="cfB"></div><div id="fnlB"></div></div>
 
   <div class="panel"><div class="sechead">Breakup by source — <span id="ttSrc"></span></div>
     <div class="cardfilt" id="bfSrc"></div>
