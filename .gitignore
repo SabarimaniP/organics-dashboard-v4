@@ -1,0 +1,6 @@
+# pre-merge snapshots of the input set, kept locally as a rollback point
+_build/_merged_pre_aug8/
+_build/_merged_pre_*/
+
+# Excel lock files
+~$*.xlsx
