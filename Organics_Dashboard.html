@@ -111,8 +111,8 @@ ol.findlist li::before{content:counter(f);font-weight:700;color:var(--navy2);fon
 <div class="panel"><div class="controls">
   <div class="ctl"><label for="period">Period</label><select id="period"></select></div>
   <div class="ctl"><label>Lead set</label><div class="seg" id="lens">
-    <button data-l="c" aria-pressed="true">Cohort</button>
     <button data-l="r" aria-pressed="false">Rolling</button>
+    <button data-l="c" aria-pressed="true">Cohort</button>
     <button data-l="b" aria-pressed="false">Both</button></div></div>
   <div class="ctl"><label>Source</label><div id="f0"></div></div>
   <div class="ctl"><label>Grade</label><div id="f1"></div></div>
@@ -343,7 +343,7 @@ function breakupControls(hostId,fi){
   per.onchange=()=>{B.pkey=per.value||null; breakup(BKEL[fi],fi);};
   host.appendChild(per);
   const seg=document.createElement('div'); seg.className='seg';
-  [['c','Cohort'],['r','Rolling'],['b','Both']].forEach(([v,t])=>{
+  [['r','Rolling'],['c','Cohort'],['b','Both']].forEach(([v,t])=>{
     const b=document.createElement('button');
     b.textContent=t; b.setAttribute('aria-pressed',String(B.lens===v));
     b.onclick=()=>{B.lens=v;[...seg.children].forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
