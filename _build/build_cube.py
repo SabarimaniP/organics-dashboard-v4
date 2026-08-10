@@ -179,7 +179,11 @@ sm["wk"] = sm.sd.map(wk)
 # ---- phone fallback -------------------------------------------------------------------------
 # The sales sheet's Lead Link sometimes points at a lead that is not in the leads export. Before
 # giving up on that sale, try to find the lead by phone number instead.
-ph10 = lambda s: s.astype(str).str.replace(r"\D", "", regex=True).str[-10:]
+# A blank cell anywhere in a phone column makes pandas read the whole column as float, so a number
+# arrives as "7095571808.0". Stripping non-digits would give "70955718080" and the last-10 slice
+# "0955718080" - a corrupted key. Drop a trailing ".0" first. No effect on int or text columns.
+ph10 = lambda s: (s.astype(str).str.replace(r"\.0$", "", regex=True)
+                   .str.replace(r"\D", "", regex=True).str[-10:])
 _ph = lf.assign(k=ph10(lf["Student Phone Number"]))
 _ph = _ph[_ph.k.str.len() == 10].drop_duplicates("k")
 PHMAP = dict(zip(_ph.k, _ph.p))

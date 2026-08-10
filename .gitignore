@@ -5,3 +5,4 @@ _build/_merged_pre_*/
 # Excel lock files
 ~$*.xlsx
 _merged_pre_aug10/
+_merged_pre_sales2/
