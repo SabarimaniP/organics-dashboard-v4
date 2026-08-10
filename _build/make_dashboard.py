@@ -497,9 +497,10 @@ function funnel(el,o,cls){
   /* rows up to Demo conducted come from STAGES; the sale block below is built by hand so that
      Referral can be split out of Sale without touching the MTD, Compare or breakup views. */
   const head=STAGES.slice(0,-1);
+  /* Two rows only. Sale keeps the hand-added unlinked sales so nothing is lost when the
+     referral-tagged ones are split out: Referral + Sale still totals every sale counted. */
   const st=o.saleTracked||0, rf=o.ref||0, hard=(o.sale||0)-st;
-  const saleRows=[['Referral',rf],['Sale',st-rf],['Sale + Referral',st],
-                  ['Sale + Referral + Unlinked',o.sale||0]];
+  const saleRows=[['Referral',rf],['Sale',(st-rf)+hard]];
   el.innerHTML=`<table class="fnl"><thead><tr><th class="lft">Stage</th><th>Count</th>
     <th>% of assigned</th><th>Step</th><th style="width:120px">Shape</th></tr></thead><tbody>`+
   head.map(([k,l],i)=>{const prev=i?o[head[i-1][0]]:null,step=prev===null?null:pc(o[k],prev);
@@ -513,8 +514,7 @@ function funnel(el,o,cls){
       <td>${step===null?'—':`<span class="step up">${p1(step)}</span>`}</td>`+bar(o[k])+`</tr>`;
   }).join('')
   /* every sale row steps off Demo conducted, so the percentages stay meaningful */
-  +saleRows.map(([l,v],i)=>`<tr${i===0?' class="saletop"':''}><td class="stage">${l}${
-      l==='Sale + Referral + Unlinked'&&hard>0?` <span class="hint">incl. ${hard} unlinked</span>`:''}</td>
+  +saleRows.map(([l,v],i)=>`<tr${i===0?' class="saletop"':''}><td class="stage">${l}</td>
     <td style="font-weight:700">${fmt(v)}</td><td>${p2(pc(v,o.assigned))}</td>
     <td><span class="step up">${p1(pc(v,o.dc))}</span></td>`+bar(v)+`</tr>`).join('')
   +`</tbody></table>`;
