@@ -280,9 +280,15 @@ print("\ncalendar timeline:", ", ".join(
     f"{c['name']} {c['from']}-{c['to']}{'' if c['complete'] else ' (to date)'}" for c in CALM))
 print(f"\nrows {len(rows):,} leads with activity of {len(lf):,} total")
 
-# hardcoded: 3 sales without activity records (HAri Aug 1, Laxman Aug 4, Tazmeen Aug 4)
-hardcoded_sales = {13: 1, 14: 2}  # HAri W13 (Aug 1), Laxman & Tazmeen W14 (Aug 4)
-hardcoded_sales_aug = 3  # all 3 have sale date in August, so count in August calendar month
+# Hardcoded sales: the sale is real but its lead is absent from every export, so nothing links it to
+# a lead row and the normal path cannot see it. Each is added back by hand.
+#   HAri     Aug 1  W13   Learn (AN)     Tazmeen  Aug 4  W14   Learn (AN)
+#   Laxman   Aug 4  W14   WhatsApp Chat  Rayyan   Aug 6  W14   IL Website
+# Re-check on every rebuild: if any of these leads later appears in the leads export (and survives the
+# state filter), the normal path will count it and the hand-added figure below becomes a double count.
+hardcoded_sales = {13: 1, 14: 3}  # HAri W13; Laxman, Tazmeen, Rayyan W14
+hardcoded_sales_aug = 3           # HAri, Laxman, Tazmeen -> ROLLING bucket of the August calendar month
+hardcoded_sales_aug_cohort = 1    # Rayyan -> COHORT bucket of the August calendar month (per user)
 
 sales_by_week = {str(w): sum(1 for x in SALE_WK.values() if x == w) for w in range(1, NW + 1)}
 for w, count in hardcoded_sales.items():
@@ -298,6 +304,7 @@ CUBE = {"weeks": WEEKS, "months": MONTHS, "dims": DIMS,
                   "byWeek": sales_by_week},
         "calMonths": CALM,
         "hardcodedAugSales": hardcoded_sales_aug,
+        "hardcodedAugSalesCohort": hardcoded_sales_aug_cohort,
         "systemOwners": ["Leads Manager", "LSQ Admin", "Lead Allocation"],
         "through": THROUGH.strftime("%Y-%m-%d"), "throughLabel": THROUGH.strftime("%d %b %Y"),
         "elapsed": {str(w["id"]): int((THROUGH.normalize() - pd.Timestamp(w["start"])).days) for w in WEEKS},

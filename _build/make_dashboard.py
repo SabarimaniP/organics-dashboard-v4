@@ -276,8 +276,12 @@ function stages(C,msk){
     if(r[F[2]]&bits)x.db++;
     if(r[F[3]]&bits)x.dc++;
     if(SALEIN(r,C))x.sale++; }
-  /* hardcoded: 3 sales for August calendar (HAri, Laxman, Tazmeen) */
-  if(C.kind==='cm'&&C.m===8&&CUBE.hardcodedAugSales)o[2].sale+=CUBE.hardcodedAugSales;
+  /* Sales whose lead is missing from every export, so no row carries them. Added back by hand:
+     HAri, Laxman, Tazmeen -> rolling;  Rayyan -> cohort. August calendar month only. */
+  if(C.kind==='cm'&&C.m===8){
+    if(CUBE.hardcodedAugSales)o[2].sale+=CUBE.hardcodedAugSales;
+    if(CUBE.hardcodedAugSalesCohort)o[1].sale+=CUBE.hardcodedAugSalesCohort;
+  }
   return o;
 }
 const both=C=>{const s=stages(C),o={};STAGES.forEach(([k])=>o[k]=s[1][k]+s[2][k]);return o;};
