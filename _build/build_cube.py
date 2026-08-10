@@ -201,6 +201,14 @@ print(f"  sales rescued by phone match (Lead Link missing from the leads export)
 organic = sm[sm.p.isin(LEADSET)]
 SALE_WK = {r.p: int(r.wk) for r in organic.itertuples() if r.wk > 0}
 SALE_MO = {r.p: int(r.sd.month) for r in organic.itertuples() if r.wk > 0}
+# ---- referral layer -------------------------------------------------------------------------
+# A referral sale came from a student naming a friend during the demo/counselling call. It is a
+# SUBSET of the sales above, not an extra sale, so it carries no separate week or month - only a
+# flag. merge_referral.py marks these with Updated Lead Source = "Referral".
+_refcol = sm["Updated Lead Source"].astype(str).str.strip().str.lower() if "Updated Lead Source" in sm else None
+REFSET = set(organic.loc[_refcol.loc[organic.index].eq("referral"), "p"]) if _refcol is not None else set()
+REFSET = {p for p in REFSET if p in SALE_WK}     # only referrals that land inside W1..W14
+print(f"  referral sales (subset of the above, tagged Updated Lead Source=Referral): {len(REFSET)}")
 print(f"\nsales master {len(sm)} distinct leads | organic (in the leads file) {len(organic)} | "
       f"organic inside W1-W13 {len(SALE_WK)}")
 print(f"  excluded as non-organic (Inbound Project / WhatsApp / Referral etc.): {len(sm)-len(organic)}")
@@ -270,7 +278,9 @@ for r in lf.itertuples():
                  ab[0], ab[1], ab[2], ab[3], sb,
                  # calendar layer: 19 callMo 20 ansMo 21 dbMo 22 dcMo 23 saleMo
                  cmask_mo.get(p, 0), amask_mo.get(p, 0), dbm_mo.get(p, 0), dcm_mo.get(p, 0),
-                 SALE_MO.get(p, 0)])
+                 SALE_MO.get(p, 0),
+                 # 24 isReferral - a flag on the sale already counted at 9/23, never an extra sale
+                 1 if p in REFSET else 0])
 CALM = []
 for _m in range(5, 9):
     _a = pd.Timestamp(2026, _m, 1)

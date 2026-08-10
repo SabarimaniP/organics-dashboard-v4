@@ -32,29 +32,39 @@ o = pd.read_excel(os.path.join(MERGED, F_SM))
 n = pd.read_excel(os.path.join(TOPUP, T_SM2), sheet_name=0)
 print(f"master rows {len(o)}   new-export rows {len(n)}")
 
-# map the activity export onto the master's column names
+# Map the activity export onto the master's column names. Only columns that already exist in the
+# master are written - assigning a name the master lacks would silently widen the schema, which is
+# exactly how this file once pushed the master from 41 to 47 columns.
 m = pd.DataFrame(index=n.index, columns=o.columns)
-m["Lead Link"]                            = LINK + n["Prospect Id"].astype(str).str.strip()
-m["Sale Date"]                            = dt(n["Sale Date"])
-m["Lead Source"]                          = n["Lead Source"]
-m["Enter Customer Name"]                  = n["Lead Name"]
-m["Enter Customer mobile number"]         = n["Phone Number"]
-m["Email"]                                = n["Email Address"]
-m["State"]                                = n["State"]
-m["Select Standard"]                      = n["Grade"]
-m["Enter Sale value (Collected Revenue)"] = n["Enter Sale value Collected Rev"]
-m["Enter Sale value (Booking Revenue)"]   = n["Enter Sale value (Booking Rev)"]
-m["Enter Down Payment Collected"]         = n["Enter Down Payment Collected"]
-m["Prediction Category with sales"]       = n["Prediction Category with sales"]
-m["Lead Owner Email"]                     = n["Lead Owner Email"]
-m["Lead Owner Name"]                      = n["Lead Owner Name"]
-m["Lead Number"]                          = n["Lead Number"]
-m["Activity Added By"]                    = n["Activity Added By"]
-m["Associate Employee"]                   = n["Owner (User Name)"]
-m["EMP MAIL ID"]                          = n["Owner (User Email)"]
-m["Notes"]                                = n["Notes"]
-m["Start time"] = m["Completion time"]    = dt(n["Activity Date"])
-m["Updated Lead Source"]                  = n["Lead Source"]
+def put(dest, series):
+    if dest in o.columns: m[dest] = series
+    else: skipped.append(dest)
+skipped = []
+put("Lead Link",                            LINK + n["Prospect Id"].astype(str).str.strip())
+put("Sale Date",                            dt(n["Sale Date"]))
+put("Lead Source",                          n["Lead Source"])
+put("Enter Customer Name",                  n["Lead Name"])
+put("Enter Customer mobile number",         n["Phone Number"])
+put("Email",                                n["Email Address"])
+put("State",                                n["State"])
+put("Select Standard",                      n["Grade"])
+put("Enter Sale value (Collected Revenue)", n["Enter Sale value Collected Rev"])
+put("Enter Sale value (Booking Revenue)",   n["Enter Sale value (Booking Rev)"])
+put("Enter Down Payment Collected",         n["Enter Down Payment Collected"])
+put("Prediction Category with sales",       n["Prediction Category with sales"])
+put("Lead Owner Email",                     n["Lead Owner Email"])
+put("Lead Owner Name",                      n["Lead Owner Name"])
+put("Lead Number",                          n["Lead Number"])
+put("Activity Added By",                    n["Activity Added By"])
+put("Associate Employee",                   n["Owner (User Name)"])
+put("EMP MAIL ID",                          n["Owner (User Email)"])
+put("Notes",                                n["Notes"])
+put("Start time",                           dt(n["Activity Date"]))
+put("Completion time",                      dt(n["Activity Date"]))
+put("Updated Lead Source",                  n["Lead Source"])
+if skipped:
+    print(f"               {len(skipped)} field(s) in the activity export have no home in the master "
+          f"schema and were dropped: {skipped}")
 
 # NOTE on phone columns: adding rows with blank alternate numbers turns that column from int64 to
 # float64, so a cell reads back as 7095571808.0. build_cube's phone fallback strips non-digits and

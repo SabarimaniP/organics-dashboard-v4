@@ -53,6 +53,15 @@ td.dark .cnt,td.dark .pct{color:#fff}
 .legend{display:flex;align-items:center;gap:9px;font-size:11.5px;color:var(--soft);margin:0 0 11px;flex-wrap:wrap}
 .legend .bar{width:110px;height:11px;border-radius:6px;background:linear-gradient(to right,#fff,var(--green));border:1px solid var(--line)}
 .fnl td.stage{text-align:left;font-weight:600;color:var(--navy);white-space:nowrap}
+.fnl tr.saletop td{border-top:2px solid var(--line)}
+.fnl td.stage .hint{font-weight:400;font-style:normal;font-size:11px;color:var(--soft);margin:0}
+.infobtn{font:inherit;font-size:11px;line-height:1;font-weight:700;color:var(--navy2);background:var(--chip);
+  border:1px solid var(--line);border-radius:50%;width:16px;height:16px;padding:0;cursor:pointer;vertical-align:middle}
+.infobtn:hover{background:var(--navy2);color:#fff;border-color:var(--navy2)}
+.infonote{display:none;white-space:normal;font-weight:400;font-size:11.5px;line-height:1.45;color:var(--soft);
+  background:var(--chip);border:1px solid var(--line);border-left:3px solid var(--navy2);border-radius:5px;
+  padding:7px 9px;margin:6px 0 2px;max-width:330px}
+.infonote.on{display:block}
 .barwrap{background:var(--chip);border-radius:3px;height:15px;min-width:70px}
 .bar{height:100%;border-radius:3px;background:var(--navy2)}
 .bar.roll{background:var(--green)}
@@ -267,7 +276,9 @@ function bases(C,msk){
 function stages(C,msk){
   const M=msk||DIMOK;
   const B=bases(C,M),o={1:{...B[1]},2:{...B[2]},3:{leads:0,assigned:0}};
-  [1,2,3].forEach(g=>{o[g].called=o[g].answered=o[g].db=o[g].dc=o[g].sale=0;});
+  /* saleTracked = sales carried by a real lead row. sale = that plus the hand-added ones.
+     ref = referral-tagged, a SUBSET of saleTracked. */
+  [1,2,3].forEach(g=>{o[g].called=o[g].answered=o[g].db=o[g].dc=o[g].sale=o[g].saleTracked=o[g].ref=0;});
   const bits=PBITS(C),F=FLD(C);
   for(const r of ROWS){ if(!M[r[0]])continue;
     const g=memb(r[1],r[2],C),x=o[g];
@@ -275,7 +286,7 @@ function stages(C,msk){
     if(r[F[1]]&bits)x.answered++;
     if(r[F[2]]&bits)x.db++;
     if(r[F[3]]&bits)x.dc++;
-    if(SALEIN(r,C))x.sale++; }
+    if(SALEIN(r,C)){x.sale++;x.saleTracked++;if(r[24])x.ref++;} }
   /* Sales whose lead is missing from every export, so no row carries them. Added back by hand:
      HAri, Laxman, Tazmeen -> rolling;  Rayyan -> cohort. August calendar month only. */
   if(C.kind==='cm'&&C.m===8){
@@ -284,10 +295,12 @@ function stages(C,msk){
   }
   return o;
 }
-const both=C=>{const s=stages(C),o={};STAGES.forEach(([k])=>o[k]=s[1][k]+s[2][k]);return o;};
+/* the funnel needs saleTracked and ref summed alongside the named STAGES */
+const SUMK=[...STAGES.map(([k])=>k),'saleTracked','ref'];
+const both=C=>{const s=stages(C),o={};SUMK.forEach(k=>o[k]=s[1][k]+s[2][k]);return o;};
 const cur=C=>{const s=stages(C);return LENS==='c'?s[1]:LENS==='r'?s[2]:both(C);};
 const pick=(s,w)=>{ if(w==='c')return s[1]; if(w==='r')return s[2];
-  const o={};STAGES.forEach(([k])=>o[k]=s[1][k]+s[2][k]);return o; };
+  const o={};SUMK.forEach(k=>o[k]=s[1][k]+s[2][k]);return o; };
 const tip=$('#tip');
 document.addEventListener('mouseover',e=>{const t=e.target.closest('[data-tip]');
   if(!t){tip.style.opacity=0;return;}tip.innerHTML=t.dataset.tip;tip.style.opacity=1;});
@@ -474,16 +487,37 @@ function breakup(elId,fi){
 }
 
 /* ---------------- funnels ---------------- */
+/* Lead assigned is read off the lead's current owner, so it cannot say WHEN a lead was assigned.
+   The + next to that row says so. */
+const ASSIGN_NOTE=`Lead assigned is derived from the lead owner, not from a date.
+The lead may have been assigned on a different date &mdash; ownership is what is counted here.`;
 function funnel(el,o,cls){
   const mx=o.leads||1;
+  const bar=v=>`<td><div class="barwrap"><div class="bar ${cls||''}" style="width:${Math.max(.6,100*v/mx).toFixed(1)}%"></div></div></td>`;
+  /* rows up to Demo conducted come from STAGES; the sale block below is built by hand so that
+     Referral can be split out of Sale without touching the MTD, Compare or breakup views. */
+  const head=STAGES.slice(0,-1);
+  const st=o.saleTracked||0, rf=o.ref||0, hard=(o.sale||0)-st;
+  const saleRows=[['Referral',rf],['Sale',st-rf],['Sale + Referral',st],
+                  ['Sale + Referral + Unlinked',o.sale||0]];
   el.innerHTML=`<table class="fnl"><thead><tr><th class="lft">Stage</th><th>Count</th>
     <th>% of assigned</th><th>Step</th><th style="width:120px">Shape</th></tr></thead><tbody>`+
-  STAGES.map(([k,l],i)=>{const prev=i?o[STAGES[i-1][0]]:null,st=prev===null?null:pc(o[k],prev);
-    return `<tr><td class="stage">${l}</td><td style="font-weight:700">${fmt(o[k])}</td>
+  head.map(([k,l],i)=>{const prev=i?o[head[i-1][0]]:null,step=prev===null?null:pc(o[k],prev);
+    const tag=k==='assigned'
+      ? `${l} <button type="button" class="infobtn" title="How this is derived"
+           onclick="this.parentNode.querySelector('.infonote').classList.toggle('on')">+</button>
+         <div class="infonote">${ASSIGN_NOTE.split('\n').map(x=>`<div>${x}</div>`).join('')}</div>`
+      : l;
+    return `<tr><td class="stage">${tag}</td><td style="font-weight:700">${fmt(o[k])}</td>
       <td>${k==='leads'?'—':p2(pc(o[k],o.assigned))}</td>
-      <td>${st===null?'—':`<span class="step up">${p1(st)}</span>`}</td>
-      <td><div class="barwrap"><div class="bar ${cls||''}" style="width:${Math.max(.6,100*o[k]/mx).toFixed(1)}%"></div></div></td></tr>`;
-  }).join('')+`</tbody></table>`;
+      <td>${step===null?'—':`<span class="step up">${p1(step)}</span>`}</td>`+bar(o[k])+`</tr>`;
+  }).join('')
+  /* every sale row steps off Demo conducted, so the percentages stay meaningful */
+  +saleRows.map(([l,v],i)=>`<tr${i===0?' class="saletop"':''}><td class="stage">${l}${
+      l==='Sale + Referral + Unlinked'&&hard>0?` <span class="hint">incl. ${hard} unlinked</span>`:''}</td>
+    <td style="font-weight:700">${fmt(v)}</td><td>${p2(pc(v,o.assigned))}</td>
+    <td><span class="step up">${p1(pc(v,o.dc))}</span></td>`+bar(v)+`</tr>`).join('')
+  +`</tbody></table>`;
 }
 function overview(){
   const C=ctx(PKEY);
