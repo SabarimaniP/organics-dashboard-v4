@@ -44,9 +44,16 @@ extra = [c for c in n.columns if c not in o.columns]
 if extra: print(f"leads          dropping columns absent from the base schema: {extra}")
 n = n.reindex(columns=o.columns)
 before = len(o)
+# When a lead is in both the base and the top-up, prefer the TOP-UP row: it is the fresher export
+# and may carry a corrected State or Owner. Sorting on (_c, _src) makes the choice deterministic,
+# so re-running this script is idempotent - without it the winner depended on concat order and one
+# lead's State could flip between runs.
+o["_src"], n["_src"] = 1, 0
 m = pd.concat([o, n], ignore_index=True)
 m["_c"] = dt(m["Created On"])
-m = m.sort_values("_c").drop_duplicates("Prospect ID", keep="first").drop(columns="_c")
+m = (m.sort_values(["_c", "_src"])
+       .drop_duplicates("Prospect ID", keep="first")
+       .drop(columns=["_c", "_src"]))
 print(f"leads          base {before:>7,} + topup {len(n):>6,} -> {len(m):>7,}   added {len(m)-before:,}")
 print(f"               created up to {dt(m['Created On']).max()}")
 m.to_excel(os.path.join(MERGED, F_LEADS), index=False)
@@ -91,6 +98,15 @@ print(f"               {before} -> {len(out)}   appended {len(fresh)}")
 print(f"               columns {len(out.columns)}   sale dates {sd.min():%d %b} .. {sd.max():%d %b}")
 print(f"               August rows: {int(((sd >= pd.Timestamp('2026-08-01')) & (sd <= pd.Timestamp('2026-08-12'))).sum())}")
 out.to_excel(os.path.join(MERGED, F_SM), index=False)
+
+# The sheet is the authoritative August list. Its LeadIDs go to a sidecar so build_cube can scope
+# the August buckets to exactly these rows - the master also carries August sales that predate the
+# sheet (Laxman, Degala Kruthika, Rayyan, Shifra Joe) and counting those would overstate Rolling.
+import json
+sheet_keys = sorted(set(k for k in s["_k"].dropna()))
+with open(os.path.join(MERGED, "_aug_sale_keys.json"), "w") as fh:
+    json.dump(sheet_keys, fh)
+print(f"               wrote _aug_sale_keys.json with {len(sheet_keys)} sheet LeadIDs")
 
 print("=" * 92)
 print("merged input set updated in:", MERGED)

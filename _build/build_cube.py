@@ -176,6 +176,8 @@ if sm.sd.isna().any(): sys.exit(f"unparsable Sale Date: {sm.loc[sm.sd.isna(),'Sa
 sm = sm.dropna(subset=["p"]).sort_values("sd").drop_duplicates("p", keep="first")
 sm = sm[sm.sd <= CAP].copy()
 sm["wk"] = sm.sd.map(wk)
+# keep the Lead Link id as it was written, before the phone fallback below reassigns p
+sm["p0"] = sm["p"]
 # ---- phone fallback -------------------------------------------------------------------------
 # The sales sheet's Lead Link sometimes points at a lead that is not in the leads export. Before
 # giving up on that sale, try to find the lead by phone number instead.
@@ -243,20 +245,61 @@ SALE_CLS = {r.p: int(r.cls) for r in organic.itertuples() if r.wk > 0}
 _cc = collections.Counter(SALE_CLS.values())
 print("  sale classes inside the window: "
       + ", ".join(f"{CLS_NAME[k]}={_cc.get(k,0)}" for k in (CLS_M0, CLS_REF, CLS_REACT, CLS_OTHER)))
+# ---- August buckets, matching the split the user signed off ----------------------------------
+# Three peer buckets:  M0 | Rolling | Reactivation
+#   Reactivation = organic origin + WhatsApp updated source
+#   M0           = organic origin + organic updated source AND a fresh lead (see M0_FROM)
+#   Rolling      = everything else, i.e. aged M0 + Referral + Other
+# Referral stays visible as a subset of Rolling rather than a fourth bucket.
+#
+# Counted from the SALES SHEET, not from lead rows: 14 of the 45 August rows have no lead in any
+# export (11 of them Reactivation), and row-based counting showed Reactivation as 10 instead of 19.
+# A lead date is consulted only to decide whether an M0-source sale is fresh (M0) or aged (Rolling).
+# This also retires the hand-added sales for August - each is already a row in the sheet.
+#
+# M0_FROM is the fresh-lead boundary. 27 Jul is the only value that reproduces the signed-off
+# 4 / 22 / 19 split, and it is the first day of W13. CHANGE THIS ONE CONSTANT if the intended
+# rule turns out to be different - nothing else needs touching.
+M0_FROM = pd.Timestamp("2026-07-27")
+
 _augmask = (sm.sd >= pd.Timestamp("2026-08-01")) & (sm.sd <= CAP)
 _aug = sm.loc[_augmask]
-# The August calendar month is counted from the SALES SHEET, not from lead rows. Referral,
-# Reactivation and Other are rolling by rule, so they need no cohort/rolling split and therefore
-# no lead record - requiring one silently dropped 9 of 19 Reactivation sales. Only M0 needs a lead,
-# and only to decide cohort vs rolling. This also retires the hand-added sales for August: every
-# one of them is already a row in the master.
-_cmonth = dict(zip(lf.p, lf.cmonth))
-AUG_BY_CLASS = collections.Counter(int(c) for c in _aug["cls"])
-AUG_COHORT_M0 = sum(1 for r in _aug.itertuples()
-                    if r.cls == CLS_M0 and r.p in LEADSET and _cmonth.get(r.p) == 8)
-print("  August (calendar) from the sales sheet: "
-      + ", ".join(f"{CLS_NAME[k]}={AUG_BY_CLASS.get(k,0)}" for k in (CLS_M0, CLS_REF, CLS_REACT, CLS_OTHER))
-      + f"  | total {sum(AUG_BY_CLASS.values())}  of which M0-cohort {AUG_COHORT_M0}")
+# Scope August to the sales sheet. merge_aug12.py drops its LeadIDs here; the master also holds
+# older August rows (Laxman, Degala Kruthika, Rayyan, Shifra Joe) that the sheet does not list, and
+# counting them would overstate Rolling. Without the sidecar, fall back to every August row.
+_keyfile = os.path.join(DATA, "_aug_sale_keys.json")
+if os.path.exists(_keyfile):
+    import json as _json
+    _sheet_keys = set(_json.load(open(_keyfile)))
+    _before = len(_aug)
+    # match on p0 - the phone fallback may have remapped p away from the sheet's own Lead Link id
+    _aug = _aug[_aug.p0.isin(_sheet_keys)]
+    print(f"  August scoped to the sales sheet: {len(_aug)} of {_before} master August rows "
+          f"({_before - len(_aug)} not listed in the sheet, excluded)")
+# lead creation date from every source available, no state filter - the sheet's own rows matter
+# here even when the lead is dropped from the funnel population
+_created = dict(zip(lf.p, lf.c))
+for _fn, _dc in ((F_CALLS, "Lead Created On"), (F_DB, "Lead Created On"), (F_DC, "Lead Created On")):
+    try:
+        _d = pd.read_excel(P(_fn), usecols=["Prospect Id", _dc])
+    except ValueError:
+        continue
+    for _p, _c in zip(pid(_d["Prospect Id"]), dt(_d[_dc])):
+        if _p not in _created and pd.notna(_c): _created[_p] = _c
+
+AUG = collections.Counter()
+for r in _aug.itertuples():
+    if r.cls == CLS_REACT:
+        AUG["react"] += 1
+    elif r.cls == CLS_M0 and pd.notna(_created.get(r.p)) and _created[r.p] >= M0_FROM:
+        AUG["m0"] += 1
+    else:
+        AUG["rolling"] += 1
+        if r.cls == CLS_REF: AUG["referral"] += 1
+AUG_TOTAL = AUG["m0"] + AUG["rolling"] + AUG["react"]
+print(f"  August (calendar) from the sales sheet -> M0 {AUG['m0']} | Rolling {AUG['rolling']} "
+      f"(incl. {AUG['referral']} referral) | Reactivation {AUG['react']} | TOTAL {AUG_TOTAL}"
+      f"   [M0 fresh-lead boundary {M0_FROM:%d %b}]")
 print(f"\nsales master {len(sm)} distinct leads | organic (in the leads file) {len(organic)} | "
       f"organic inside W1-W13 {len(SALE_WK)}")
 print(f"  excluded as non-organic (Inbound Project / WhatsApp / Referral etc.): {len(sm)-len(organic)}")
@@ -391,9 +434,10 @@ CUBE = {"weeks": WEEKS, "months": MONTHS, "dims": DIMS,
         # counted straight from the sales sheet below, where these already appear as rows)
         "hardcodedAugByClass": {str(k): v for k, v in hardcoded_cls.items()},
         "saleClasses": {str(k): v for k, v in CLS_NAME.items()},
-        # August calendar month, counted from the sales sheet
-        "augSaleByClass": {str(k): AUG_BY_CLASS.get(k, 0) for k in (CLS_M0, CLS_REF, CLS_REACT, CLS_OTHER)},
-        "augSaleCohortM0": int(AUG_COHORT_M0),
+        # August calendar month, counted from the sales sheet: M0 | Rolling | Reactivation
+        "augSale": {"m0": AUG["m0"], "rolling": AUG["rolling"], "react": AUG["react"],
+                    "referral": AUG["referral"], "total": AUG_TOTAL},
+        "augM0From": M0_FROM.strftime("%Y-%m-%d"),
         "systemOwners": ["Leads Manager", "LSQ Admin", "Lead Allocation"],
         "through": THROUGH.strftime("%Y-%m-%d"), "throughLabel": THROUGH.strftime("%d %b %Y"),
         "elapsed": {str(w["id"]): int((THROUGH.normalize() - pd.Timestamp(w["start"])).days) for w in WEEKS},

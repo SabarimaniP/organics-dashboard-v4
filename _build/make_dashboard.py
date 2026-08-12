@@ -279,49 +279,39 @@ function stages(C,msk){
   /* saleTracked = sales carried by a real lead row. sale = that plus the hand-added ones.
      m0/ref/react/oth are the August sale classes and always sum to saleTracked. */
   [1,2,3].forEach(g=>{o[g].called=o[g].answered=o[g].db=o[g].dc=o[g].sale=o[g].saleTracked
-    =o[g].m0=o[g].ref=o[g].react=o[g].oth=0;});
+    =o[g].m0=o[g].roll=o[g].react=o[g].refIn=0;});
   const bits=PBITS(C),F=FLD(C);
+  /* The source-pair classification is AUGUST ONLY. Every other period counts sales exactly as it
+     always did - straight into the bucket its lead's creation date gives it - and renders a single
+     Sale row, because m0/ref/react/oth stay at zero. */
+  const AUG=(C.kind==='cm'&&C.m===8);
   for(const r of ROWS){ if(!M[r[0]])continue;
     const g=memb(r[1],r[2],C),x=o[g];
     if(r[F[0]]&bits)x.called++;
     if(r[F[1]]&bits)x.answered++;
     if(r[F[2]]&bits)x.db++;
     if(r[F[3]]&bits)x.dc++;
-    if(SALEIN(r,C)){
-      /* Only an M0 sale can sit in cohort. Referral, Reactivation and Other are rolling by
-         rule, whatever month their lead was created in. */
-      const cl=r[24], y=(cl===CLS.M0||cl===0)?x:o[2];
-      y.sale++; y.saleTracked++;
-      if(cl===CLS.REF)y.ref++; else if(cl===CLS.REACT)y.react++;
-      else if(cl===CLS.OTHER)y.oth++; else y.m0++;
-    } }
-  if(C.kind==='cm'&&C.m===8){
-    /* AUGUST: sales come from the sales sheet, not from lead rows. Referral, Reactivation and
-       Other are rolling by rule and need no lead record - requiring one dropped 9 of 19
-       Reactivation sales. Only M0 needs a lead, and only to split cohort from rolling. This
-       replaces the row-derived figures above, so the hand-added sales are not applied here:
-       they are already rows in the sheet. */
-    const A=CUBE.augSaleByClass||{}, cohM0=CUBE.augSaleCohortM0||0;
-    const m0=+A[CLS.M0]||0, rf=+A[CLS.REF]||0, rc=+A[CLS.REACT]||0, ot=+A[CLS.OTHER]||0;
-    o[1].m0=cohM0; o[1].ref=o[1].react=o[1].oth=0;
-    o[1].sale=o[1].saleTracked=cohM0;
-    o[2].m0=m0-cohM0; o[2].ref=rf; o[2].react=rc; o[2].oth=ot;
-    o[2].sale=o[2].saleTracked=(m0-cohM0)+rf+rc+ot;
-  } else if(C.kind==='cm'||C.kind==='m'||C.kind==='w'){
-    /* every other period keeps the previous behaviour, including the hand-added sales */
+    if(SALEIN(r,C)&&!AUG){x.sale++;x.saleTracked++;} }
+  if(AUG){
+    /* AUGUST ONLY - three buckets, straight from the sales sheet: M0 | Rolling | Reactivation.
+       M0 is the only fresh-lead bucket so it is the only one that can be cohort; Rolling and
+       Reactivation sit on the rolling side. Referral is carried as a subset of Rolling.
+       Hand-added sales are NOT applied here: each is already a row in the sheet. */
+    const A=CUBE.augSale||{};
+    o[1].m0=+A.m0||0; o[1].sale=o[1].saleTracked=+A.m0||0;
+    o[2].roll=+A.rolling||0; o[2].react=+A.react||0; o[2].refIn=+A.referral||0;
+    o[2].sale=o[2].saleTracked=(+A.rolling||0)+(+A.react||0);
+  } else if(C.weeks&&(C.weeks.includes(13)||C.weeks.includes(14)||C.weeks.includes(15))){
+    /* week-group views keep the old row-based behaviour, hand-added sales included */
     const H=CUBE.hardcodedAugByClass||{};
-    if(C.kind!=='cm'&&C.weeks&&(C.weeks.includes(13)||C.weeks.includes(14)||C.weeks.includes(15))){
-      Object.keys(H).forEach(k=>{ const cl=+k,n=H[k]; o[2].sale+=n;
-        if(cl===CLS.REF)o[2].ref+=n; else if(cl===CLS.REACT)o[2].react+=n;
-        else if(cl===CLS.OTHER)o[2].oth+=n; else o[2].m0+=n; });
-    }
+    Object.keys(H).forEach(k=>{ o[2].sale+=H[k]; });
   }
   return o;
 }
 /* sale-class codes, mirrored from build_cube.py */
 const CLS={M0:1,REF:2,REACT:3,OTHER:4};
 /* the funnel needs the class counters summed alongside the named STAGES */
-const SUMK=[...STAGES.map(([k])=>k),'saleTracked','m0','ref','react','oth'];
+const SUMK=[...STAGES.map(([k])=>k),'saleTracked','m0','roll','react','refIn'];
 const both=C=>{const s=stages(C),o={};SUMK.forEach(k=>o[k]=s[1][k]+s[2][k]);return o;};
 const cur=C=>{const s=stages(C);return LENS==='c'?s[1]:LENS==='r'?s[2]:both(C);};
 const pick=(s,w)=>{ if(w==='c')return s[1]; if(w==='r')return s[2];
@@ -522,11 +512,15 @@ function funnel(el,o,cls){
   /* rows up to Demo conducted come from STAGES; the sale block below is built by hand so that
      Referral can be split out of Sale without touching the MTD, Compare or breakup views. */
   const head=STAGES.slice(0,-1);
-  /* Sale is the total. Under it, the August identifiers: M0 is the only class that can be
-     cohort; Referral, Reactivation and Other are rolling by rule. The four always sum to Sale. */
-  const saleRows=[['Sale',o.sale||0],['M0',o.m0||0],['Referral',o.ref||0],
-                  ['Reactivation',o.react||0],['Other',o.oth||0]]
-                 .filter(([l,v])=>l==='Sale'||l==='M0'||v>0);
+  /* Sale is the total. The August identifiers sit under it and always sum to Sale. Outside
+     August the class counters are all zero, so only the plain Sale row renders - previous
+     months read exactly as they did before. */
+  const cls=(o.m0||0)+(o.roll||0)+(o.react||0);
+  const rhint=(o.refIn||0)>0?` <span class="hint">incl. ${o.refIn} referral</span>`:'';
+  const saleRows=cls>0
+    ? [['Sale',o.sale||0,''],['M0',o.m0||0,''],['Rolling',o.roll||0,rhint],
+       ['Reactivation',o.react||0,'']].filter(([l,v])=>l==='Sale'||v>0)
+    : [['Sale',o.sale||0,'']];
   el.innerHTML=`<table class="fnl"><thead><tr><th class="lft">Stage</th><th>Count</th>
     <th>% of assigned</th><th>Step</th><th style="width:120px">Shape</th></tr></thead><tbody>`+
   head.map(([k,l],i)=>{const prev=i?o[head[i-1][0]]:null,step=prev===null?null:pc(o[k],prev);
@@ -540,8 +534,8 @@ function funnel(el,o,cls){
       <td>${step===null?'—':`<span class="step up">${p1(step)}</span>`}</td>`+bar(o[k])+`</tr>`;
   }).join('')
   /* every sale row steps off Demo conducted, so the percentages stay meaningful */
-  +saleRows.map(([l,v],i)=>`<tr${i===0?' class="saletop"':''}><td class="stage"${
-      i?' style="padding-left:20px;font-weight:500"':''}>${i?'&mdash; ':''}${l}</td>
+  +saleRows.map(([l,v,extra],i)=>`<tr${i===0?' class="saletop"':''}><td class="stage"${
+      i?' style="padding-left:20px;font-weight:500"':''}>${i?'&mdash; ':''}${l}${extra||''}</td>
     <td style="font-weight:${i?500:700}">${fmt(v)}</td><td>${p2(pc(v,o.assigned))}</td>
     <td><span class="step up">${p1(pc(v,o.dc))}</span></td>`+bar(v)+`</tr>`).join('')
   +`</tbody></table>`;
