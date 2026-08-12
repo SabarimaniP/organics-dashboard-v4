@@ -515,9 +515,11 @@ function funnel(el,o,cls){
   /* Sale is the total. The August identifiers sit under it and always sum to Sale. Outside
      August the class counters are all zero, so only the plain Sale row renders - previous
      months read exactly as they did before. */
-  const cls=(o.m0||0)+(o.roll||0)+(o.react||0);
+  /* NB: do not name this `cls` - that is funnel()'s CSS-class parameter, and redeclaring it is a
+     SyntaxError that kills the whole script. */
+  const nBuckets=(o.m0||0)+(o.roll||0)+(o.react||0);
   const rhint=(o.refIn||0)>0?` <span class="hint">incl. ${o.refIn} referral</span>`:'';
-  const saleRows=cls>0
+  const saleRows=nBuckets>0
     ? [['Sale',o.sale||0,''],['M0',o.m0||0,''],['Rolling',o.roll||0,rhint],
        ['Reactivation',o.react||0,'']].filter(([l,v])=>l==='Sale'||v>0)
     : [['Sale',o.sale||0,'']];
