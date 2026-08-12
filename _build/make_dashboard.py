@@ -277,8 +277,9 @@ function stages(C,msk){
   const M=msk||DIMOK;
   const B=bases(C,M),o={1:{...B[1]},2:{...B[2]},3:{leads:0,assigned:0}};
   /* saleTracked = sales carried by a real lead row. sale = that plus the hand-added ones.
-     ref = referral-tagged, a SUBSET of saleTracked. */
-  [1,2,3].forEach(g=>{o[g].called=o[g].answered=o[g].db=o[g].dc=o[g].sale=o[g].saleTracked=o[g].ref=0;});
+     m0/ref/react/oth are the August sale classes and always sum to saleTracked. */
+  [1,2,3].forEach(g=>{o[g].called=o[g].answered=o[g].db=o[g].dc=o[g].sale=o[g].saleTracked
+    =o[g].m0=o[g].ref=o[g].react=o[g].oth=0;});
   const bits=PBITS(C),F=FLD(C);
   for(const r of ROWS){ if(!M[r[0]])continue;
     const g=memb(r[1],r[2],C),x=o[g];
@@ -286,17 +287,41 @@ function stages(C,msk){
     if(r[F[1]]&bits)x.answered++;
     if(r[F[2]]&bits)x.db++;
     if(r[F[3]]&bits)x.dc++;
-    if(SALEIN(r,C)){x.sale++;x.saleTracked++;if(r[24])x.ref++;} }
-  /* Sales whose lead is missing from every export, so no row carries them. Added back by hand:
-     HAri, Laxman, Tazmeen -> rolling;  Rayyan -> cohort. August calendar month only. */
+    if(SALEIN(r,C)){
+      /* Only an M0 sale can sit in cohort. Referral, Reactivation and Other are rolling by
+         rule, whatever month their lead was created in. */
+      const cl=r[24], y=(cl===CLS.M0||cl===0)?x:o[2];
+      y.sale++; y.saleTracked++;
+      if(cl===CLS.REF)y.ref++; else if(cl===CLS.REACT)y.react++;
+      else if(cl===CLS.OTHER)y.oth++; else y.m0++;
+    } }
   if(C.kind==='cm'&&C.m===8){
-    if(CUBE.hardcodedAugSales)o[2].sale+=CUBE.hardcodedAugSales;
-    if(CUBE.hardcodedAugSalesCohort)o[1].sale+=CUBE.hardcodedAugSalesCohort;
+    /* AUGUST: sales come from the sales sheet, not from lead rows. Referral, Reactivation and
+       Other are rolling by rule and need no lead record - requiring one dropped 9 of 19
+       Reactivation sales. Only M0 needs a lead, and only to split cohort from rolling. This
+       replaces the row-derived figures above, so the hand-added sales are not applied here:
+       they are already rows in the sheet. */
+    const A=CUBE.augSaleByClass||{}, cohM0=CUBE.augSaleCohortM0||0;
+    const m0=+A[CLS.M0]||0, rf=+A[CLS.REF]||0, rc=+A[CLS.REACT]||0, ot=+A[CLS.OTHER]||0;
+    o[1].m0=cohM0; o[1].ref=o[1].react=o[1].oth=0;
+    o[1].sale=o[1].saleTracked=cohM0;
+    o[2].m0=m0-cohM0; o[2].ref=rf; o[2].react=rc; o[2].oth=ot;
+    o[2].sale=o[2].saleTracked=(m0-cohM0)+rf+rc+ot;
+  } else if(C.kind==='cm'||C.kind==='m'||C.kind==='w'){
+    /* every other period keeps the previous behaviour, including the hand-added sales */
+    const H=CUBE.hardcodedAugByClass||{};
+    if(C.kind!=='cm'&&C.weeks&&(C.weeks.includes(13)||C.weeks.includes(14)||C.weeks.includes(15))){
+      Object.keys(H).forEach(k=>{ const cl=+k,n=H[k]; o[2].sale+=n;
+        if(cl===CLS.REF)o[2].ref+=n; else if(cl===CLS.REACT)o[2].react+=n;
+        else if(cl===CLS.OTHER)o[2].oth+=n; else o[2].m0+=n; });
+    }
   }
   return o;
 }
-/* the funnel needs saleTracked and ref summed alongside the named STAGES */
-const SUMK=[...STAGES.map(([k])=>k),'saleTracked','ref'];
+/* sale-class codes, mirrored from build_cube.py */
+const CLS={M0:1,REF:2,REACT:3,OTHER:4};
+/* the funnel needs the class counters summed alongside the named STAGES */
+const SUMK=[...STAGES.map(([k])=>k),'saleTracked','m0','ref','react','oth'];
 const both=C=>{const s=stages(C),o={};SUMK.forEach(k=>o[k]=s[1][k]+s[2][k]);return o;};
 const cur=C=>{const s=stages(C);return LENS==='c'?s[1]:LENS==='r'?s[2]:both(C);};
 const pick=(s,w)=>{ if(w==='c')return s[1]; if(w==='r')return s[2];
@@ -497,10 +522,11 @@ function funnel(el,o,cls){
   /* rows up to Demo conducted come from STAGES; the sale block below is built by hand so that
      Referral can be split out of Sale without touching the MTD, Compare or breakup views. */
   const head=STAGES.slice(0,-1);
-  /* Two rows only. Sale keeps the hand-added unlinked sales so nothing is lost when the
-     referral-tagged ones are split out: Referral + Sale still totals every sale counted. */
-  const st=o.saleTracked||0, rf=o.ref||0, hard=(o.sale||0)-st;
-  const saleRows=[['Referral',rf],['Sale',(st-rf)+hard]];
+  /* Sale is the total. Under it, the August identifiers: M0 is the only class that can be
+     cohort; Referral, Reactivation and Other are rolling by rule. The four always sum to Sale. */
+  const saleRows=[['Sale',o.sale||0],['M0',o.m0||0],['Referral',o.ref||0],
+                  ['Reactivation',o.react||0],['Other',o.oth||0]]
+                 .filter(([l,v])=>l==='Sale'||l==='M0'||v>0);
   el.innerHTML=`<table class="fnl"><thead><tr><th class="lft">Stage</th><th>Count</th>
     <th>% of assigned</th><th>Step</th><th style="width:120px">Shape</th></tr></thead><tbody>`+
   head.map(([k,l],i)=>{const prev=i?o[head[i-1][0]]:null,step=prev===null?null:pc(o[k],prev);
@@ -514,8 +540,9 @@ function funnel(el,o,cls){
       <td>${step===null?'—':`<span class="step up">${p1(step)}</span>`}</td>`+bar(o[k])+`</tr>`;
   }).join('')
   /* every sale row steps off Demo conducted, so the percentages stay meaningful */
-  +saleRows.map(([l,v],i)=>`<tr${i===0?' class="saletop"':''}><td class="stage">${l}</td>
-    <td style="font-weight:700">${fmt(v)}</td><td>${p2(pc(v,o.assigned))}</td>
+  +saleRows.map(([l,v],i)=>`<tr${i===0?' class="saletop"':''}><td class="stage"${
+      i?' style="padding-left:20px;font-weight:500"':''}>${i?'&mdash; ':''}${l}</td>
+    <td style="font-weight:${i?500:700}">${fmt(v)}</td><td>${p2(pc(v,o.assigned))}</td>
     <td><span class="step up">${p1(pc(v,o.dc))}</span></td>`+bar(v)+`</tr>`).join('')
   +`</tbody></table>`;
 }

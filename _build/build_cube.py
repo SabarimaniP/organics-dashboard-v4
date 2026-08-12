@@ -37,10 +37,10 @@ dt  = lambda s: pd.to_datetime(s, errors="coerce", dayfirst=True)
 pid = lambda s: s.astype(str).str.strip().str.lower()
 
 # ---------------------------------------------------------------- 1. time
-W1, NW = pd.Timestamp("2026-05-04"), 14
+W1, NW = pd.Timestamp("2026-05-04"), 15   # Aug 1-12 top-up: activity to 11 Aug, so W15 (10-16 Aug) opens
 # Everything is capped at the end of the last complete day of data. Leads created after the cap have
 # had no chance to be called, and counting them would understate the newest week's rates.
-CAP = pd.Timestamp("2026-08-09 23:59:59")   # Aug 1-10 top-up: activity runs to 9 Aug, so W14 is now a complete week
+CAP = pd.Timestamp("2026-08-11 23:59:59")   # Aug 1-12 top-up: activity runs to 11 Aug (W15 is partial, 10-11 of 10-16)
 WEND = W1 + pd.Timedelta(days=7 * NW - 1)
 WEEKS = []
 for i in range(NW):
@@ -201,14 +201,62 @@ print(f"  sales rescued by phone match (Lead Link missing from the leads export)
 organic = sm[sm.p.isin(LEADSET)]
 SALE_WK = {r.p: int(r.wk) for r in organic.itertuples() if r.wk > 0}
 SALE_MO = {r.p: int(r.sd.month) for r in organic.itertuples() if r.wk > 0}
-# ---- referral layer -------------------------------------------------------------------------
-# A referral sale came from a student naming a friend during the demo/counselling call. It is a
-# SUBSET of the sales above, not an extra sale, so it carries no separate week or month - only a
-# flag. merge_referral.py marks these with Updated Lead Source = "Referral".
-_refcol = sm["Updated Lead Source"].astype(str).str.strip().str.lower() if "Updated Lead Source" in sm else None
-REFSET = set(organic.loc[_refcol.loc[organic.index].eq("referral"), "p"]) if _refcol is not None else set()
-REFSET = {p for p in REFSET if p in SALE_WK}     # only referrals that land inside W1..W14
-print(f"  referral sales (subset of the above, tagged Updated Lead Source=Referral): {len(REFSET)}")
+# ---- sale classification (August logic) -----------------------------------------------------
+# Every sale is classified from the PAIR (Original Source, Updated Lead Source):
+#
+#   Updated = Referral                               -> REFERRAL
+#   Updated = WhatsApp Chat / Middle East + WhatsApp  -> REACTIVATION
+#   Original organic AND Updated organic             -> M0   (the only class that splits
+#                                                              cohort vs rolling)
+#   anything else                                    -> OTHER
+#
+# Organic ORIGINAL sources are Website, Website Inbound, Surge and App - Website and Website
+# Inbound are the same thing. The organic UPDATED sources are the same set under the names the
+# sales sheet actually uses (IL Website, IL Surge, Learn App ...).
+# Referral, Reactivation and Other all sit on the ROLLING side; only M0 can be cohort.
+ORIG_ORGANIC = {"website", "website inbound", "surge", "app"}
+UPD_REFERRAL = {"referral"}
+UPD_REACT    = {"whatsapp chat", "middle east + whatsapp", "whatsapp middle east",
+                "middle east + whatsapp chat", "whatsapp"}
+UPD_M0       = {"website", "website inbound", "il website", "surge", "il surge", "search",
+                "app", "learn app", "learn (an)", "learn an", "learnin", "learn"}
+CLS_M0, CLS_REF, CLS_REACT, CLS_OTHER = 1, 2, 3, 4
+CLS_NAME = {CLS_M0: "M0", CLS_REF: "Referral", CLS_REACT: "Reactivation", CLS_OTHER: "Other"}
+
+def _norm_src(v):
+    return " ".join(str(v or "").strip().lower().split())
+
+def sale_class(orig, upd):
+    """Organic ORIGIN gates all three named classes; everything else is Other."""
+    o_, u_ = _norm_src(orig), _norm_src(upd)
+    if o_ not in ORIG_ORGANIC:              return CLS_OTHER
+    if u_ in UPD_REFERRAL:                  return CLS_REF
+    if u_ in UPD_REACT:                     return CLS_REACT
+    if u_ in UPD_M0:                        return CLS_M0
+    return CLS_OTHER
+
+_o = sm["Original Source"]     if "Original Source"     in sm else pd.Series("", index=sm.index)
+_u = sm["Updated Lead Source"] if "Updated Lead Source" in sm else pd.Series("", index=sm.index)
+sm["cls"] = [sale_class(a, b) for a, b in zip(_o, _u)]
+organic = sm[sm.p.isin(LEADSET)]
+SALE_CLS = {r.p: int(r.cls) for r in organic.itertuples() if r.wk > 0}
+_cc = collections.Counter(SALE_CLS.values())
+print("  sale classes inside the window: "
+      + ", ".join(f"{CLS_NAME[k]}={_cc.get(k,0)}" for k in (CLS_M0, CLS_REF, CLS_REACT, CLS_OTHER)))
+_augmask = (sm.sd >= pd.Timestamp("2026-08-01")) & (sm.sd <= CAP)
+_aug = sm.loc[_augmask]
+# The August calendar month is counted from the SALES SHEET, not from lead rows. Referral,
+# Reactivation and Other are rolling by rule, so they need no cohort/rolling split and therefore
+# no lead record - requiring one silently dropped 9 of 19 Reactivation sales. Only M0 needs a lead,
+# and only to decide cohort vs rolling. This also retires the hand-added sales for August: every
+# one of them is already a row in the master.
+_cmonth = dict(zip(lf.p, lf.cmonth))
+AUG_BY_CLASS = collections.Counter(int(c) for c in _aug["cls"])
+AUG_COHORT_M0 = sum(1 for r in _aug.itertuples()
+                    if r.cls == CLS_M0 and r.p in LEADSET and _cmonth.get(r.p) == 8)
+print("  August (calendar) from the sales sheet: "
+      + ", ".join(f"{CLS_NAME[k]}={AUG_BY_CLASS.get(k,0)}" for k in (CLS_M0, CLS_REF, CLS_REACT, CLS_OTHER))
+      + f"  | total {sum(AUG_BY_CLASS.values())}  of which M0-cohort {AUG_COHORT_M0}")
 print(f"\nsales master {len(sm)} distinct leads | organic (in the leads file) {len(organic)} | "
       f"organic inside W1-W13 {len(SALE_WK)}")
 print(f"  excluded as non-organic (Inbound Project / WhatsApp / Referral etc.): {len(sm)-len(organic)}")
@@ -279,8 +327,9 @@ for r in lf.itertuples():
                  # calendar layer: 19 callMo 20 ansMo 21 dbMo 22 dcMo 23 saleMo
                  cmask_mo.get(p, 0), amask_mo.get(p, 0), dbm_mo.get(p, 0), dcm_mo.get(p, 0),
                  SALE_MO.get(p, 0),
-                 # 24 isReferral - a flag on the sale already counted at 9/23, never an extra sale
-                 1 if p in REFSET else 0])
+                 # 24 saleClass: 0 none, 1 M0, 2 Referral, 3 Reactivation, 4 Other.
+                 # A label on the sale already counted at 9/23 - never an extra sale.
+                 SALE_CLS.get(p, 0)])
 CALM = []
 for _m in range(5, 9):
     _a = pd.Timestamp(2026, _m, 1)
@@ -300,9 +349,28 @@ print(f"\nrows {len(rows):,} leads with activity of {len(lf):,} total")
 #   Laxman   Aug 4  W14   WhatsApp Chat  Rayyan   Aug 6  W14   IL Website
 # Re-check on every rebuild: if any of these leads later appears in the leads export (and survives the
 # state filter), the normal path will count it and the hand-added figure below becomes a double count.
-hardcoded_sales = {13: 1, 14: 3}  # HAri W13; Laxman, Tazmeen, Rayyan W14
-hardcoded_sales_aug = 3           # HAri, Laxman, Tazmeen -> ROLLING bucket of the August calendar month
-hardcoded_sales_aug_cohort = 1    # Rayyan -> COHORT bucket of the August calendar month (per user)
+HARDCODED_IDS = {"3223045e-7ecd-4114-ae34-19f69221e466": ("HAri", 13),
+                 "e9d507c8-1948-11f1-8166-02b754a99095": ("Laxman Khatwani", 14),
+                 "5fd0a6ed-6252-4177-909d-f3a38e834e4e": ("Tazmeen mehwish", 14),
+                 "04ffa05b-81eb-11f1-bff5-0a572a71c62d": ("Rayyan", 14)}
+# Their class is read from the same source pair as every other sale, so it self-corrects if the
+# sheet ever reclassifies them. All four sit on the ROLLING side: under the August rule only an
+# M0 sale with a lead created in the period can be cohort, and these have no usable lead row.
+hardcoded_sales = collections.Counter()          # week -> count, for the week-group view
+hardcoded_cls   = collections.Counter()          # class -> count, rolling side of Aug calendar
+_smk = sm.set_index("p") if sm.index.name != "p" else sm
+for _pid, (_nm, _wk) in HARDCODED_IDS.items():
+    _row = sm[sm.p == _pid]
+    if _pid in LEADSET:
+        print(f"  hardcoded {_nm}: lead now present in the leads export -> counted normally, NOT hand-added")
+        continue
+    _c = int(_row["cls"].iloc[0]) if len(_row) else CLS_OTHER
+    hardcoded_sales[_wk] += 1
+    hardcoded_cls[_c] += 1
+    print(f"  hand-added {_nm:<18} W{_wk}  class {CLS_NAME[_c]}  (lead in no export)")
+hardcoded_sales = dict(hardcoded_sales)
+hardcoded_sales_aug = sum(hardcoded_cls.values())   # all on the rolling side
+hardcoded_sales_aug_cohort = 0
 
 sales_by_week = {str(w): sum(1 for x in SALE_WK.values() if x == w) for w in range(1, NW + 1)}
 for w, count in hardcoded_sales.items():
@@ -319,6 +387,13 @@ CUBE = {"weeks": WEEKS, "months": MONTHS, "dims": DIMS,
         "calMonths": CALM,
         "hardcodedAugSales": hardcoded_sales_aug,
         "hardcodedAugSalesCohort": hardcoded_sales_aug_cohort,
+        # hand-added sales split by class (week-group views only - the August calendar month is
+        # counted straight from the sales sheet below, where these already appear as rows)
+        "hardcodedAugByClass": {str(k): v for k, v in hardcoded_cls.items()},
+        "saleClasses": {str(k): v for k, v in CLS_NAME.items()},
+        # August calendar month, counted from the sales sheet
+        "augSaleByClass": {str(k): AUG_BY_CLASS.get(k, 0) for k in (CLS_M0, CLS_REF, CLS_REACT, CLS_OTHER)},
+        "augSaleCohortM0": int(AUG_COHORT_M0),
         "systemOwners": ["Leads Manager", "LSQ Admin", "Lead Allocation"],
         "through": THROUGH.strftime("%Y-%m-%d"), "throughLabel": THROUGH.strftime("%d %b %Y"),
         "elapsed": {str(w["id"]): int((THROUGH.normalize() - pd.Timestamp(w["start"])).days) for w in WEEKS},
