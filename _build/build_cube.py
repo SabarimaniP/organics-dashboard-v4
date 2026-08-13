@@ -40,7 +40,8 @@ pid = lambda s: s.astype(str).str.strip().str.lower()
 W1, NW = pd.Timestamp("2026-05-04"), 15   # Aug 1-12 top-up: activity to 11 Aug, so W15 (10-16 Aug) opens
 # Everything is capped at the end of the last complete day of data. Leads created after the cap have
 # had no chance to be called, and counting them would understate the newest week's rates.
-CAP = pd.Timestamp("2026-08-11 23:59:59")   # Aug 1-12 top-up: activity runs to 11 Aug (W15 is partial, 10-11 of 10-16)
+CAP = pd.Timestamp("2026-08-12 23:59:59")   # Aug 1-13 top-up: activity reaches 13 Aug but only to ~11am, so the
+                                            # last COMPLETE day is the 12th. W15 partial (10-12 of 10-16).
 WEND = W1 + pd.Timedelta(days=7 * NW - 1)
 WEEKS = []
 for i in range(NW):
