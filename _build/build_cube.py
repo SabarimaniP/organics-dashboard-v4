@@ -288,15 +288,37 @@ for _fn, _dc in ((F_CALLS, "Lead Created On"), (F_DB, "Lead Created On"), (F_DC,
     for _p, _c in zip(pid(_d["Prospect Id"]), dt(_d[_dc])):
         if _p not in _created and pd.notna(_c): _created[_p] = _c
 
+# bucket code: 1 = M0, 2 = Rolling (not referral), 3 = Reactivation, 4 = Rolling referral
+def _aug_bucket(cls_, p_):
+    if cls_ == CLS_REACT: return 3
+    if cls_ == CLS_M0 and pd.notna(_created.get(p_)) and _created[p_] >= M0_FROM: return 1
+    return 4 if cls_ == CLS_REF else 2
+
+# The August buckets must respond to the Source / Grade / State filters, so each sale needs a
+# dimension. It cannot come from the lead: 19 of these rows have no lead record at all. It comes
+# from the SHEET instead - Original Source is the organic channel and maps 1:1 onto the three
+# dashboard sources, with Select Standard for grade and State for state. One rule for all rows,
+# so a sale's dimension never depends on whether its lead happened to be exported.
+ORIG_TO_SRC = {"website": "IL Website", "website inbound": "IL Website",
+               "surge": "IL Surge", "app": "Learn App"}
+_augd = _aug.copy()
+_augd["_bk"] = [_aug_bucket(c, p) for c, p in zip(_augd["cls"], _augd["p"])]
+_augd["_sd"] = [ORIG_TO_SRC.get(_norm_src(v), "Other") for v in _augd["Original Source"]]
+_augd["_gd"] = [norm_grade(v) for v in _augd.get("Select Standard", pd.Series(index=_augd.index))]
+_augd["_st"] = [norm_state(v) or "Blank/Unknown" for v in _augd["State"]]
+_unmapped = int((_augd["_sd"] == "Other").sum())
+if _unmapped:
+    print(f"  !! {_unmapped} August sale(s) have an Original Source outside "
+          f"{sorted(ORIG_TO_SRC)} and fall into source 'Other'")
+AUG_DIMCOUNT = collections.Counter(zip(_augd["_sd"], _augd["_gd"], _augd["_st"], _augd["_bk"]))
+
 AUG = collections.Counter()
-for r in _aug.itertuples():
-    if r.cls == CLS_REACT:
-        AUG["react"] += 1
-    elif r.cls == CLS_M0 and pd.notna(_created.get(r.p)) and _created[r.p] >= M0_FROM:
-        AUG["m0"] += 1
+for (_s, _g, _t, _b), _n in AUG_DIMCOUNT.items():
+    if _b == 1:   AUG["m0"] += _n
+    elif _b == 3: AUG["react"] += _n
     else:
-        AUG["rolling"] += 1
-        if r.cls == CLS_REF: AUG["referral"] += 1
+        AUG["rolling"] += _n
+        if _b == 4: AUG["referral"] += _n
 AUG_TOTAL = AUG["m0"] + AUG["rolling"] + AUG["react"]
 print(f"  August (calendar) from the sales sheet -> M0 {AUG['m0']} | Rolling {AUG['rolling']} "
       f"(incl. {AUG['referral']} referral) | Reactivation {AUG['react']} | TOTAL {AUG_TOTAL}"
@@ -374,6 +396,19 @@ for r in lf.itertuples():
                  # 24 saleClass: 0 none, 1 M0, 2 Referral, 3 Reactivation, 4 Other.
                  # A label on the sale already counted at 9/23 - never an extra sale.
                  SALE_CLS.get(p, 0)])
+# Resolve the August sale dimensions now that DIMS exists. dim_id() will mint a combo that the
+# leads data never produced, which is fine and necessary: a sale whose lead was never exported
+# still has a real source/grade/state from the sheet, and the funnel must be able to filter on it.
+AUG_SALE_DIM = collections.Counter()
+_newdims = 0
+for (_s, _g, _t, _b), _n in AUG_DIMCOUNT.items():
+    _before = len(DIMS)
+    AUG_SALE_DIM[(dim_id((_s, _g, _t)), _b)] += _n
+    if len(DIMS) > _before: _newdims += 1
+AUG_SALE_DIM = [[d, b, n] for (d, b), n in sorted(AUG_SALE_DIM.items())]
+print(f"  August sales carry {len(AUG_SALE_DIM)} dim/bucket cells"
+      + (f" ({_newdims} new dim combo(s) minted from the sheet)" if _newdims else ""))
+
 CALM = []
 for _m in range(5, 9):
     _a = pd.Timestamp(2026, _m, 1)
@@ -438,6 +473,8 @@ CUBE = {"weeks": WEEKS, "months": MONTHS, "dims": DIMS,
         # August calendar month, counted from the sales sheet: M0 | Rolling | Reactivation
         "augSale": {"m0": AUG["m0"], "rolling": AUG["rolling"], "react": AUG["react"],
                     "referral": AUG["referral"], "total": AUG_TOTAL},
+        # [dimIdx, bucket, count]  bucket: 1 M0 · 2 Rolling · 3 Reactivation · 4 Rolling-referral
+        "augSaleDim": AUG_SALE_DIM,
         "augM0From": M0_FROM.strftime("%Y-%m-%d"),
         "systemOwners": ["Leads Manager", "LSQ Admin", "Lead Allocation"],
         "through": THROUGH.strftime("%Y-%m-%d"), "throughLabel": THROUGH.strftime("%d %b %Y"),

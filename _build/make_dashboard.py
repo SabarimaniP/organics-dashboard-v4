@@ -305,10 +305,14 @@ function stages(C,msk){
        M0 is the only fresh-lead bucket so it is the only one that can be cohort; Rolling and
        Reactivation sit on the rolling side. Referral is carried as a subset of Rolling.
        Hand-added sales are NOT applied here: each is already a row in the sheet. */
-    const A=CUBE.augSale||{};
-    o[1].m0=+A.m0||0; o[1].sale=o[1].saleTracked=+A.m0||0;
-    o[2].roll=+A.rolling||0; o[2].react=+A.react||0; o[2].refIn=+A.referral||0;
-    o[2].sale=o[2].saleTracked=(+A.rolling||0)+(+A.react||0);
+    /* summed per dimension so the Source / Grade / State filters apply - a flat total would sit
+       there unchanged while every other stage went to zero. */
+    let m0=0,rl=0,rc=0,rf=0;
+    for(const [d,b,n] of (CUBE.augSaleDim||[])){ if(!M[d])continue;
+      if(b===1)m0+=n; else if(b===3)rc+=n; else {rl+=n; if(b===4)rf+=n;} }
+    o[1].m0=m0; o[1].sale=o[1].saleTracked=m0;
+    o[2].roll=rl; o[2].react=rc; o[2].refIn=rf;
+    o[2].sale=o[2].saleTracked=rl+rc;
   } else if(C.weeks&&(C.weeks.includes(13)||C.weeks.includes(14)||C.weeks.includes(15))){
     /* week-group views keep the old row-based behaviour, hand-added sales included */
     const H=CUBE.hardcodedAugByClass||{};
@@ -447,7 +451,15 @@ function breakupData(C,fi,msk,lens){
     if(r[F[1]]&bits)o.answered++;
     if(r[F[2]]&bits)o.db++;
     if(r[F[3]]&bits)o.dc++;
-    if(SALEIN(r,C))o.sale++; }
+    if(!(C.kind==='cm'&&C.m===8)&&SALEIN(r,C))o.sale++; }
+  /* August sales come from the sheet, not from lead rows, so they are added here from the same
+     per-dimension table the funnel uses - otherwise these cards would undercount and disagree
+     with it. M0 is the cohort side; Rolling and Reactivation are the rolling side. */
+  if(C.kind==='cm'&&C.m===8){
+    for(const [d,b,n] of (CUBE.augSaleDim||[])){ if(!M[d])continue;
+      if(!want(b===1?1:2))continue;
+      get(DIMS[d][fi]).sale+=n; }
+  }
   return out;                     /* raw, ungrouped: name -> funnel */
 }
 /* order, then fold the tail into "Other" while remembering which names went in */
