@@ -96,7 +96,9 @@ ol.findlist li::before{content:counter(f);font-weight:700;color:var(--navy2);fon
 .fsub{display:block;font-size:12px;color:var(--soft);margin-top:2px}
 .mssel{font:inherit;font-size:11.5px;color:var(--navy2);background:#fbfcfe;border:1.5px solid var(--line);
   border-radius:6px;padding:4px 7px;min-width:auto}
-.bkgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(238px,1fr))}
+/* min card width must leave room for the bar: the 5 fixed bkrow columns + gaps + padding come to
+   ~238px, so anything near that collapses the 1fr bar to nothing. 292px keeps it legible. */
+.bkgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(292px,1fr))}
 .bkcard{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff}
 .bkcard h3{margin:0;font-size:12.5px;font-weight:700;color:#fff;background:var(--navy2);
   padding:8px 10px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
@@ -114,7 +116,7 @@ ol.findlist li::before{content:counter(f);font-weight:700;color:var(--navy2);fon
   font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--soft);
   border-bottom:1px solid var(--line);background:#fafbfd}
 .bkhead span:nth-child(3),.bkhead span:nth-child(4),.bkhead span:nth-child(5){text-align:right}
-.mini{background:var(--chip);border-radius:2px;height:11px}
+.mini{background:var(--chip);border-radius:2px;height:11px;min-width:34px}
 .mini>i{display:block;height:100%;border-radius:2px;background:var(--navy2)}
 #tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .08s;z-index:99;background:var(--navy);
   color:#fff;font-size:12px;line-height:1.45;padding:7px 10px;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.28);max-width:300px}
