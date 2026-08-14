@@ -101,13 +101,19 @@ ol.findlist li::before{content:counter(f);font-weight:700;color:var(--navy2);fon
 .bkcard h3{margin:0;font-size:12.5px;font-weight:700;color:#fff;background:var(--navy2);
   padding:8px 10px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .bkcard h3 span{font-weight:400;font-size:11px;opacity:.85}
-.bkrow{display:grid;grid-template-columns:64px 1fr 52px 46px;gap:7px;align-items:center;
+/* 5 columns: label | bar | count | step % (vs the stage above) | change vs the previous period */
+.bkrow{display:grid;grid-template-columns:60px 1fr 48px 42px 44px;gap:6px;align-items:center;
   padding:5px 10px;border-bottom:1px solid #f1f4f8;font-size:12px}
 .bkrow:last-child{border-bottom:0}
 .bkrow .lbl{color:var(--soft)}
 .bkrow .n{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+.bkrow .s{text-align:right;font-size:10.5px;color:var(--green);font-variant-numeric:tabular-nums;font-weight:700}
 .bkrow .p{text-align:right;font-size:10.5px;color:#3d4c60;font-variant-numeric:tabular-nums;font-weight:700}
 .bkrow .p.up{color:var(--green)}.bkrow .p.down{color:var(--red)}
+.bkhead{display:grid;grid-template-columns:60px 1fr 48px 42px 44px;gap:6px;padding:4px 10px 3px;
+  font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--soft);
+  border-bottom:1px solid var(--line);background:#fafbfd}
+.bkhead span:nth-child(3),.bkhead span:nth-child(4),.bkhead span:nth-child(5){text-align:right}
 .mini{background:var(--chip);border-radius:2px;height:11px}
 .mini>i{display:block;height:100%;border-radius:2px;background:var(--navy2)}
 #tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .08s;z-index:99;background:var(--navy);
@@ -474,6 +480,8 @@ function breakup(elId,fi){
     const mx=c.f.leads||1;
     return '<div class="bkcard"><h3>'+esc(c.name)
       +'<span>'+p1(pc(c.f.leads,tot))+' of leads</span></h3>'
+      +'<div class="bkhead"><span>Stage</span><span></span><span>Count</span><span>Step</span>'
+      +'<span>'+(plab?'vs prev':'')+'</span></div>'
       +STAGES.map(([k,l],i)=>{
         const prev=i?c.f[STAGES[i-1][0]]:null, st=prev===null?null:pc(c.f[k],prev);
         const was=pv(c.members,k);
@@ -491,6 +499,7 @@ function breakup(elId,fi){
           +'<span class="lbl">'+SHORT[i]+'</span>'
           +'<span class="mini"><i style="width:'+Math.max(.8,100*c.f[k]/mx).toFixed(1)+'%"></i></span>'
           +'<span class="n">'+fmt(c.f[k])+'</span>'
+          +'<span class="s">'+(st===null?'—':p1(st))+'</span>'
           +'<span class="p '+cls+'">'+cell+'</span></div>';}).join('')
       +'</div>';}).join('');
 }
@@ -594,7 +603,7 @@ function weekly(){
         ${open?`<span class="cnt">${fmt(v)}</span><span class="pct">${p2(p)}</span>`:`<span class="pct">·</span>`}</td>`;});
     h+=`<td class="base">${fmt(tot)}</td></tr>`;
     M[i].forEach((v,j)=>T[j]+=v); TL+=L[i]; TA+=A[i]; TAN+=AN[i];});
-  h+=`<tr class="tot"><td class="lft">All 13 weeks</td><td>${fmt(TL)}</td><td>${fmt(TA)}</td>`
+  h+=`<tr class="tot"><td class="lft">All ${NW} weeks</td><td>${fmt(TL)}</td><td>${fmt(TA)}</td>`
     +(V.speed?`<td>${fmt(TAN)}</td>`:'')
     +T.map(v=>`<td>${fmt(v)}<div class="pct">${p2(pc(v,V.den==='answered'?TAN:TA))}</div></td>`).join('')
     +`<td>${fmt(T.reduce((a,b)=>a+b,0))}</td></tr></tbody></table></div>`;
@@ -652,8 +661,11 @@ function compare(){
     <th>A · ${ca.label}<div style="font-weight:400;font-size:10px;opacity:.85">${ca.range}</div></th>
     <th>B · ${cb.label}<div style="font-weight:400;font-size:10px;opacity:.85">${cb.range}</div></th>
     <th>Difference</th><th>Change</th></tr></thead><tbody>`
-   +STAGES.map(([k,l])=>{const d=oa[k]-ob[k];
-     return `<tr><td class="lft" style="font-weight:600">${l}</td><td>${fmt(oa[k])}</td><td>${fmt(ob[k])}</td>
+   /* each count carries its step % off the stage above, so A and B are comparable stage by stage */
+   +STAGES.map(([k,l],i)=>{const d=oa[k]-ob[k], pk=i?STAGES[i-1][0]:null;
+     const cell=o=>`<span class="cnt">${fmt(o[k])}</span>`
+       +(pk?`<span class="pct">${p1(pc(o[k],o[pk]))} step</span>`:'');
+     return `<tr><td class="lft" style="font-weight:600">${l}</td><td>${cell(oa)}</td><td>${cell(ob)}</td>
        <td class="${d>=0?'up':'down'}" style="font-weight:700">${d>=0?'+':''}${fmt(d)}</td>
        <td>${ob[k]?(d>=0?'+':'')+p1(pc(d,ob[k])):'—'}</td></tr>`;}).join('')
    +`</tbody></table></div>`;
