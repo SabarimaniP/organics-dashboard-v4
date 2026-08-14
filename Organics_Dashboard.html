@@ -96,15 +96,15 @@ ol.findlist li::before{content:counter(f);font-weight:700;color:var(--navy2);fon
 .fsub{display:block;font-size:12px;color:var(--soft);margin-top:2px}
 .mssel{font:inherit;font-size:11.5px;color:var(--navy2);background:#fbfcfe;border:1.5px solid var(--line);
   border-radius:6px;padding:4px 7px;min-width:auto}
-/* min card width must leave room for the bar: the 5 fixed bkrow columns + gaps + padding come to
-   ~238px, so anything near that collapses the 1fr bar to nothing. 292px keeps it legible. */
-.bkgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(292px,1fr))}
+/* min card width must leave room for the bar: the 4 fixed bkrow columns + gaps + padding come to
+   ~197px, so keep the minimum comfortably above that or the 1fr bar collapses to nothing. */
+.bkgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(252px,1fr))}
 .bkcard{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff}
 .bkcard h3{margin:0;font-size:12.5px;font-weight:700;color:#fff;background:var(--navy2);
   padding:8px 10px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .bkcard h3 span{font-weight:400;font-size:11px;opacity:.85}
-/* 5 columns: label | bar | count | step % (vs the stage above) | change vs the previous period */
-.bkrow{display:grid;grid-template-columns:60px 1fr 48px 42px 44px;gap:6px;align-items:center;
+/* 4 columns: label | bar | count | step % off the stage above */
+.bkrow{display:grid;grid-template-columns:60px 1fr 50px 46px;gap:7px;align-items:center;
   padding:5px 10px;border-bottom:1px solid #f1f4f8;font-size:12px}
 .bkrow:last-child{border-bottom:0}
 .bkrow .lbl{color:var(--soft)}
@@ -112,10 +112,10 @@ ol.findlist li::before{content:counter(f);font-weight:700;color:var(--navy2);fon
 .bkrow .s{text-align:right;font-size:10.5px;color:var(--green);font-variant-numeric:tabular-nums;font-weight:700}
 .bkrow .p{text-align:right;font-size:10.5px;color:#3d4c60;font-variant-numeric:tabular-nums;font-weight:700}
 .bkrow .p.up{color:var(--green)}.bkrow .p.down{color:var(--red)}
-.bkhead{display:grid;grid-template-columns:60px 1fr 48px 42px 44px;gap:6px;padding:4px 10px 3px;
+.bkhead{display:grid;grid-template-columns:60px 1fr 50px 46px;gap:7px;padding:4px 10px 3px;
   font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--soft);
   border-bottom:1px solid var(--line);background:#fafbfd}
-.bkhead span:nth-child(3),.bkhead span:nth-child(4),.bkhead span:nth-child(5){text-align:right}
+.bkhead span:nth-child(3),.bkhead span:nth-child(4){text-align:right}
 .mini{background:var(--chip);border-radius:2px;height:11px;min-width:34px}
 .mini>i{display:block;height:100%;border-radius:2px;background:var(--navy2)}
 #tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .08s;z-index:99;background:var(--navy);
@@ -482,18 +482,11 @@ function breakup(elId,fi){
     const mx=c.f.leads||1;
     return '<div class="bkcard"><h3>'+esc(c.name)
       +'<span>'+p1(pc(c.f.leads,tot))+' of leads</span></h3>'
-      +'<div class="bkhead"><span>Stage</span><span></span><span>Count</span><span>Step</span>'
-      +'<span>'+(plab?'vs prev':'')+'</span></div>'
+      +'<div class="bkhead"><span>Stage</span><span></span><span>Count</span><span>Step</span></div>'
       +STAGES.map(([k,l],i)=>{
         const prev=i?c.f[STAGES[i-1][0]]:null, st=prev===null?null:pc(c.f[k],prev);
+        /* the previous period is tooltip-only now - it is no longer a column */
         const was=pv(c.members,k);
-        let cell='\u2014', cls='';
-        if(was!==null){
-          if(was===0&&c.f[k]===0){cell='\u2014';}
-          else if(was===0){cell='new'; cls='up';}
-          else {const ch=100*(c.f[k]-was)/was;
-            cell=(ch>=0?'+':'\u2212')+Math.abs(ch).toFixed(0)+'%'; cls=ch>=0?'up':'down';}
-        }
         return '<div class="bkrow" data-tip="<b>'+esc(c.name)+' \u00b7 '+l+'</b><br>'+fmt(c.f[k])
           +(k==='leads'?'':'<br>'+p2(pc(c.f[k],c.f.assigned))+' of assigned')
           +(st===null?'':'<br>step '+p1(st))
@@ -501,8 +494,7 @@ function breakup(elId,fi){
           +'<span class="lbl">'+SHORT[i]+'</span>'
           +'<span class="mini"><i style="width:'+Math.max(.8,100*c.f[k]/mx).toFixed(1)+'%"></i></span>'
           +'<span class="n">'+fmt(c.f[k])+'</span>'
-          +'<span class="s">'+(st===null?'—':p1(st))+'</span>'
-          +'<span class="p '+cls+'">'+cell+'</span></div>';}).join('')
+          +'<span class="s">'+(st===null?'—':p1(st))+'</span></div>';}).join('')
       +'</div>';}).join('');
 }
 
