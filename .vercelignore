@@ -1,0 +1,10 @@
+# The dashboard is a single self-contained HTML file - every number is already inlined
+# in it, so nothing else needs to reach the CDN.
+#
+# This is an allowlist, not a denylist, on purpose. _build/_merged holds the raw exports
+# with lead names, phone numbers and owners; on Netlify those were publicly downloadable
+# because the publish root was ".". Allowlisting means a new data file added later is
+# excluded by default instead of silently shipping to a public URL.
+*
+!Organics_Dashboard.html
+!vercel.json
