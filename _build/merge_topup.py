@@ -11,7 +11,13 @@
 #
 # The top-up is cohort+rolling only, so it omits activity against pre-June leads. Union, never
 # replace, or the base's August activity against older leads is lost.
+#
+# Pass --no-sales when the activity exports have refreshed but the sales sheet has not. Re-merging an
+# unchanged sheet is logically a no-op, but it still rewrites the master workbook and produces a
+# spurious diff, so the flag leaves the sales master and _aug_sale_keys.json exactly as they are.
 import pandas as pd, os, shutil, glob, json, sys
+
+SKIP_SALES = "--no-sales" in sys.argv
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MERGED = os.path.join(HERE, "_merged")
@@ -40,12 +46,15 @@ def pick(*must, avoid=()):
 ROLES = {"leads":     pick("leads", "created"),
          "calls":     pick("outbound"),
          "booked":    pick("demo booking"),
-         "conducted": pick("demo conducted"),
-         "sales":     pick("sales")}
+         "conducted": pick("demo conducted")}
+if not SKIP_SALES:
+    ROLES["sales"] = pick("sales")
 
 print("=" * 94); print("FOLDING IN THE LATEST TOP-UP"); print("=" * 94)
 for r, p in ROLES.items():
     print(f"  {r:<10} {os.path.basename(p)}")
+if SKIP_SALES:
+    print("  sales      SKIPPED (--no-sales) - master and _aug_sale_keys.json left untouched")
 print()
 
 BACKUP = os.path.join(HERE, "_merged_pre_" + pd.Timestamp.fromtimestamp(
@@ -90,6 +99,13 @@ merge_act(F_DB,    "booked",    "Activity Date", "demo booked")
 merge_act(F_DC,    "conducted", "Activity Date", "demo conducted")
 
 # ---------------------------------------------------------------- sales
+if SKIP_SALES:
+    _sm = pd.read_excel(os.path.join(MERGED, F_SM))
+    _sd = pd.to_datetime(_sm["Sale Date"], format="%d-%b-%y", errors="coerce").fillna(dt(_sm["Sale Date"]))
+    print(f"sales          left as-is: {len(_sm)} rows, sale dates through {_sd.max():%d %b}")
+    print("=" * 94); print("merged input set updated in:", MERGED)
+    sys.exit(0)
+
 o = pd.read_excel(os.path.join(MERGED, F_SM))
 s = pd.read_excel(ROLES["sales"], sheet_name=0)
 missing = [c for c in o.columns if c not in s.columns]
