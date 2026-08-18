@@ -95,11 +95,25 @@ put("Select Standard", n["Grade"])
 put("Original Source", [SRC_TO_BARE.get(nz(v), v) for v in n["Lead Source"]])
 put("Updated Lead Source", n["Lead Source"])
 put("Enter Customer Name", n["Lead Name"])
-for a, b in (("Enter Sale value Collected Rev", "Enter Sale value Collected Rev"),
-             ("Enter Sale value (Booking Rev)", "Enter Sale value (Booking Rev)"),
-             ("Enter Customer mobile number", "Phone Number")):
-    if b in n.columns:
-        put(a, n[b])
+
+# The csv ABBREVIATES the revenue headers - "Collected Rev" against the master's
+# "(Collected Revenue)". Mapping them by identical name silently left revenue blank on every new
+# row, which is invisible in the sale counts and only shows up when someone asks for money.
+# Master name on the left, csv name on the right, and never assume the two agree.
+money = lambda s: pd.to_numeric(s.astype(str).str.replace(r"[^\d.\-]", "", regex=True),
+                                errors="coerce")
+for master_col, csv_col, conv in (
+        ("Enter Sale value (Collected Revenue)", "Enter Sale value Collected Rev", money),
+        ("Enter Sale value (Booking Revenue)",   "Enter Sale value (Booking Rev)",  money),
+        ("Enter Customer mobile number",         "Phone Number",                    lambda s: s)):
+    if csv_col in n.columns:
+        put(master_col, conv(n[csv_col]))
+    else:
+        print(f"  !! csv has no {csv_col!r} - {master_col!r} left blank")
+
+_rev = money(n["Enter Sale value Collected Rev"])
+print(f"\n  collected revenue on the new rows: {int(_rev.notna().sum())}/{len(n)} priced, "
+      f"total {_rev.sum():,.0f}")
 
 print("\n  source mapping applied:")
 for k, v in pd.Series([SRC_TO_BARE.get(nz(v), f"{v} (-> Other)") for v in n["Lead Source"]]).value_counts().items():

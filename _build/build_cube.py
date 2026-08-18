@@ -326,19 +326,45 @@ _unmapped = int((_augd["_sd"] == "Other").sum())
 if _unmapped:
     print(f"  !! {_unmapped} August sale(s) have an Original Source outside "
           f"{sorted(ORIG_TO_SRC)} and fall into source 'Other'")
-AUG_DIMCOUNT = collections.Counter(zip(_augd["_sd"], _augd["_gd"], _augd["_st"], _augd["_bk"]))
+# Revenue rides along on the same (source, grade, state, bucket) key as the count, so the money
+# obeys the Source / Grade / State filters exactly like the units do. Collected Revenue is the
+# complete field - Booking Revenue is blank on a third of August - so that is the one carried.
+_money = lambda s: pd.to_numeric(s.astype(str).str.replace(r"[^\d.\-]", "", regex=True),
+                                 errors="coerce").fillna(0)
+_REVCOL = next((c for c in ("Enter Sale value (Collected Revenue)",
+                            "Enter Sale value (Booking Revenue)") if c in _augd.columns), None)
+_augd["_rv"] = _money(_augd[_REVCOL]) if _REVCOL else 0.0
+if _REVCOL:
+    _priced = int((_augd["_rv"] > 0).sum())
+    print(f"  August revenue from {_REVCOL!r}: {_priced}/{len(_augd)} priced, "
+          f"total {_augd['_rv'].sum():,.0f}")
+    if _priced < len(_augd):
+        print(f"  !! {len(_augd) - _priced} August sale(s) carry no revenue and count as 0")
+else:
+    print("  !! no revenue column in the sales master - August revenue will read 0")
+
+AUG_DIMCOUNT = collections.defaultdict(lambda: [0, 0.0])
+for _s, _g, _t, _b, _rv in zip(_augd["_sd"], _augd["_gd"], _augd["_st"], _augd["_bk"], _augd["_rv"]):
+    _cell = AUG_DIMCOUNT[(_s, _g, _t, _b)]
+    _cell[0] += 1
+    _cell[1] += float(_rv)
 
 AUG = collections.Counter()
-for (_s, _g, _t, _b), _n in AUG_DIMCOUNT.items():
-    if _b == 1:   AUG["m0"] += _n
-    elif _b == 3: AUG["react"] += _n
+for (_s, _g, _t, _b), (_n, _rv) in AUG_DIMCOUNT.items():
+    if _b == 1:   AUG["m0"] += _n;    AUG["m0Rev"] += _rv
+    elif _b == 3: AUG["react"] += _n; AUG["reactRev"] += _rv
     else:
         AUG["rolling"] += _n
-        if _b == 4: AUG["referral"] += _n
+        AUG["rollingRev"] += _rv
+        if _b == 4: AUG["referral"] += _n; AUG["referralRev"] += _rv
 AUG_TOTAL = AUG["m0"] + AUG["rolling"] + AUG["react"]
+AUG_REV = AUG["m0Rev"] + AUG["rollingRev"] + AUG["reactRev"]
 print(f"  August (calendar) from the sales sheet -> M0 {AUG['m0']} | Rolling {AUG['rolling']} "
       f"(incl. {AUG['referral']} referral) | Reactivation {AUG['react']} | TOTAL {AUG_TOTAL}"
       f"   [M0 fresh-lead boundary {M0_FROM:%d %b}]")
+print(f"  August revenue -> cohort {AUG['m0Rev']:,.0f} | rolling {AUG['rollingRev']:,.0f} "
+      f"(incl. referral {AUG['referralRev']:,.0f}) | reactivation {AUG['reactRev']:,.0f} "
+      f"| TOTAL {AUG_REV:,.0f}")
 print(f"\nsales master {len(sm)} distinct leads | organic (in the leads file) {len(organic)} | "
       f"organic inside W1-W13 {len(SALE_WK)}")
 print(f"  excluded as non-organic (Inbound Project / WhatsApp / Referral etc.): {len(sm)-len(organic)}")
@@ -415,13 +441,16 @@ for r in lf.itertuples():
 # Resolve the August sale dimensions now that DIMS exists. dim_id() will mint a combo that the
 # leads data never produced, which is fine and necessary: a sale whose lead was never exported
 # still has a real source/grade/state from the sheet, and the funnel must be able to filter on it.
-AUG_SALE_DIM = collections.Counter()
+_asd = collections.defaultdict(lambda: [0, 0.0])
 _newdims = 0
-for (_s, _g, _t, _b), _n in AUG_DIMCOUNT.items():
+for (_s, _g, _t, _b), (_n, _rv) in AUG_DIMCOUNT.items():
     _before = len(DIMS)
-    AUG_SALE_DIM[(dim_id((_s, _g, _t)), _b)] += _n
+    _cell = _asd[(dim_id((_s, _g, _t)), _b)]
+    _cell[0] += _n
+    _cell[1] += _rv
     if len(DIMS) > _before: _newdims += 1
-AUG_SALE_DIM = [[d, b, n] for (d, b), n in sorted(AUG_SALE_DIM.items())]
+# revenue rounded to whole rupees - it is money, and it keeps the embedded cube small
+AUG_SALE_DIM = [[d, b, n, round(rv)] for (d, b), (n, rv) in sorted(_asd.items())]
 print(f"  August sales carry {len(AUG_SALE_DIM)} dim/bucket cells"
       + (f" ({_newdims} new dim combo(s) minted from the sheet)" if _newdims else ""))
 
@@ -488,8 +517,11 @@ CUBE = {"weeks": WEEKS, "months": MONTHS, "dims": DIMS,
         "saleClasses": {str(k): v for k, v in CLS_NAME.items()},
         # August calendar month, counted from the sales sheet: M0 | Rolling | Reactivation
         "augSale": {"m0": AUG["m0"], "rolling": AUG["rolling"], "react": AUG["react"],
-                    "referral": AUG["referral"], "total": AUG_TOTAL},
-        # [dimIdx, bucket, count]  bucket: 1 M0 · 2 Rolling · 3 Reactivation · 4 Rolling-referral
+                    "referral": AUG["referral"], "total": AUG_TOTAL,
+                    "m0Rev": round(AUG["m0Rev"]), "rollingRev": round(AUG["rollingRev"]),
+                    "reactRev": round(AUG["reactRev"]), "referralRev": round(AUG["referralRev"]),
+                    "totalRev": round(AUG_REV)},
+        # [dimIdx, bucket, count, revenue]  bucket: 1 M0 · 2 Rolling · 3 React · 4 Rolling-referral
         "augSaleDim": AUG_SALE_DIM,
         "augM0From": M0_FROM.strftime("%Y-%m-%d"),
         "systemOwners": ["Leads Manager", "LSQ Admin", "Lead Allocation"],

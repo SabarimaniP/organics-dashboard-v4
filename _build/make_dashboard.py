@@ -55,6 +55,7 @@ td.dark .cnt,td.dark .pct{color:#fff}
 .fnl td.stage{text-align:left;font-weight:600;color:var(--navy);white-space:nowrap}
 .fnl tr.saletop td{border-top:2px solid var(--line)}
 .fnl td.stage .hint{font-weight:400;font-style:normal;font-size:11px;color:var(--soft);margin:0}
+.fnl td.rev{white-space:nowrap;color:var(--navy);font-variant-numeric:tabular-nums}
 .infobtn{font:inherit;font-size:11px;line-height:1;font-weight:700;color:var(--navy2);background:var(--chip);
   border:1px solid var(--line);border-radius:50%;width:16px;height:16px;padding:0;cursor:pointer;vertical-align:middle}
 .infobtn:hover{background:var(--navy2);color:#fff;border-color:var(--navy2)}
@@ -220,6 +221,13 @@ const BSTART=[0,4,8,15,31,61], SSTART=[0,4,8];
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const fmt=n=>Math.round(n).toLocaleString('en-IN');
 const pc=(a,b)=>b>0?100*a/b:0,p1=v=>v.toFixed(1)+'%',p2=v=>v.toFixed(2)+'%';
+/* money in lakh/crore - 40L reads faster than 4,007,364 in a funnel cell. inrFull keeps the exact
+   rupee figure for the tooltip, so nothing is lost to rounding. */
+const inr=n=>{n=Math.round(n||0);
+  if(n>=1e7)return'₹'+(n/1e7).toFixed(2).replace(/\.00$/,'')+'Cr';
+  if(n>=1e5)return'₹'+(n/1e5).toFixed(1).replace(/\.0$/,'')+'L';
+  return'₹'+n.toLocaleString('en-IN');};
+const inrFull=n=>'₹'+Math.round(n||0).toLocaleString('en-IN');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const has=(m,b)=>((m>>b)&1)===1;
 const STAGES=[['leads','Leads created'],['assigned','Lead assigned'],['called','Called'],
@@ -287,7 +295,10 @@ function stages(C,msk){
   /* saleTracked = sales carried by a real lead row. sale = that plus the hand-added ones.
      m0/ref/react/oth are the August sale classes and always sum to saleTracked. */
   [1,2,3].forEach(g=>{o[g].called=o[g].answered=o[g].db=o[g].dc=o[g].sale=o[g].saleTracked
-    =o[g].m0=o[g].roll=o[g].react=o[g].refIn=0;});
+    =o[g].m0=o[g].roll=o[g].react=o[g].refIn=0;
+    /* collected revenue, carried per bucket alongside the unit counts. August only - every other
+       period leaves these at 0 and the Revenue column renders as a dash. */
+    o[g].saleRev=o[g].m0Rev=o[g].rollRev=o[g].reactRev=o[g].refInRev=0;});
   const bits=PBITS(C),F=FLD(C);
   /* The source-pair classification is AUGUST ONLY. Every other period counts sales exactly as it
      always did - straight into the bucket its lead's creation date gives it - and renders a single
@@ -307,12 +318,20 @@ function stages(C,msk){
        Hand-added sales are NOT applied here: each is already a row in the sheet. */
     /* summed per dimension so the Source / Grade / State filters apply - a flat total would sit
        there unchanged while every other stage went to zero. */
-    let m0=0,rl=0,rc=0,rf=0;
-    for(const [d,b,n] of (CUBE.augSaleDim||[])){ if(!M[d])continue;
-      if(b===1)m0+=n; else if(b===3)rc+=n; else {rl+=n; if(b===4)rf+=n;} }
+    /* the 4th element is collected revenue, on the same key as the count, so filtering the money
+       and filtering the units cannot drift apart */
+    let m0=0,rl=0,rc=0,rf=0,m0R=0,rlR=0,rcR=0,rfR=0;
+    for(const [d,b,n,rv] of (CUBE.augSaleDim||[])){ if(!M[d])continue;
+      const v=rv||0;
+      if(b===1){m0+=n;m0R+=v;}
+      else if(b===3){rc+=n;rcR+=v;}
+      else {rl+=n;rlR+=v; if(b===4){rf+=n;rfR+=v;}} }
     o[1].m0=m0; o[1].sale=o[1].saleTracked=m0;
+    o[1].m0Rev=m0R; o[1].saleRev=m0R;
     o[2].roll=rl; o[2].react=rc; o[2].refIn=rf;
+    o[2].rollRev=rlR; o[2].reactRev=rcR; o[2].refInRev=rfR;
     o[2].sale=o[2].saleTracked=rl+rc;
+    o[2].saleRev=rlR+rcR;
   } else if(C.weeks&&(C.weeks.includes(13)||C.weeks.includes(14)||C.weeks.includes(15))){
     /* week-group views keep the old row-based behaviour, hand-added sales included */
     const H=CUBE.hardcodedAugByClass||{};
@@ -323,7 +342,8 @@ function stages(C,msk){
 /* sale-class codes, mirrored from build_cube.py */
 const CLS={M0:1,REF:2,REACT:3,OTHER:4};
 /* the funnel needs the class counters summed alongside the named STAGES */
-const SUMK=[...STAGES.map(([k])=>k),'saleTracked','m0','roll','react','refIn'];
+const SUMK=[...STAGES.map(([k])=>k),'saleTracked','m0','roll','react','refIn',
+  'saleRev','m0Rev','rollRev','reactRev','refInRev'];
 const both=C=>{const s=stages(C),o={};SUMK.forEach(k=>o[k]=s[1][k]+s[2][k]);return o;};
 const cur=C=>{const s=stages(C);return LENS==='c'?s[1]:LENS==='r'?s[2]:both(C);};
 const pick=(s,w)=>{ if(w==='c')return s[1]; if(w==='r')return s[2];
@@ -533,13 +553,18 @@ function funnel(el,o,cls){
   /* NB: do not name this `cls` - that is funnel()'s CSS-class parameter, and redeclaring it is a
      SyntaxError that kills the whole script. */
   const nBuckets=(o.m0||0)+(o.roll||0)+(o.react||0);
-  const rhint=(o.refIn||0)>0?` <span class="hint">incl. ${o.refIn} referral</span>`:'';
+  const rhint=(o.refIn||0)>0
+    ? ` <span class="hint">incl. ${o.refIn} referral · ${inr(o.refInRev||0)}</span>` : '';
+  /* [label, count, extra-html, revenue] */
   const saleRows=nBuckets>0
-    ? [['Sale',o.sale||0,''],['M0',o.m0||0,''],['Rolling',o.roll||0,rhint],
-       ['Reactivation',o.react||0,'']].filter(([l,v])=>l==='Sale'||v>0)
-    : [['Sale',o.sale||0,'']];
+    ? [['Sale',o.sale||0,'',o.saleRev||0],['M0',o.m0||0,'',o.m0Rev||0],
+       ['Rolling',o.roll||0,rhint,o.rollRev||0],['Reactivation',o.react||0,'',o.reactRev||0]]
+      .filter(([l,v])=>l==='Sale'||v>0)
+    : [['Sale',o.sale||0,'',o.saleRev||0]];
+  const anyRev=saleRows.some(([,,,rv])=>rv>0);
   el.innerHTML=`<table class="fnl"><thead><tr><th class="lft">Stage</th><th>Count</th>
-    <th>% of assigned</th><th>Step</th><th style="width:120px">Shape</th></tr></thead><tbody>`+
+    <th>% of assigned</th><th>Step</th>`+(anyRev?`<th>Revenue</th>`:``)+
+    `<th style="width:120px">Shape</th></tr></thead><tbody>`+
   head.map(([k,l],i)=>{const prev=i?o[head[i-1][0]]:null,step=prev===null?null:pc(o[k],prev);
     const tag=k==='assigned'
       ? `${l} <button type="button" class="infobtn" title="How this is derived"
@@ -548,13 +573,17 @@ function funnel(el,o,cls){
       : l;
     return `<tr><td class="stage">${tag}</td><td style="font-weight:700">${fmt(o[k])}</td>
       <td>${k==='leads'?'—':p2(pc(o[k],o.assigned))}</td>
-      <td>${step===null?'—':`<span class="step up">${p1(step)}</span>`}</td>`+bar(o[k])+`</tr>`;
+      <td>${step===null?'—':`<span class="step up">${p1(step)}</span>`}</td>`
+      +(anyRev?`<td class="rev">&mdash;</td>`:``)+bar(o[k])+`</tr>`;
   }).join('')
   /* every sale row steps off Demo conducted, so the percentages stay meaningful */
-  +saleRows.map(([l,v,extra],i)=>`<tr${i===0?' class="saletop"':''}><td class="stage"${
+  +saleRows.map(([l,v,extra,rv],i)=>`<tr${i===0?' class="saletop"':''}><td class="stage"${
       i?' style="padding-left:20px;font-weight:500"':''}>${i?'&mdash; ':''}${l}${extra||''}</td>
     <td style="font-weight:${i?500:700}">${fmt(v)}</td><td>${p2(pc(v,o.assigned))}</td>
-    <td><span class="step up">${p1(pc(v,o.dc))}</span></td>`+bar(v)+`</tr>`).join('')
+    <td><span class="step up">${p1(pc(v,o.dc))}</span></td>`
+    +(anyRev?`<td class="rev" data-tip="${v?`${inrFull(rv)} across ${v} sale${v===1?'':'s'} · avg ${inrFull(Math.round(rv/v))}`:'no sales'}"${
+       i?'':' style="font-weight:700"'}>${rv>0?inr(rv):'&mdash;'}</td>`:``)
+    +bar(v)+`</tr>`).join('')
   +`</tbody></table>`;
 }
 function overview(){
