@@ -302,7 +302,23 @@ def _aug_bucket(cls_, p_):
 ORIG_TO_SRC = {"website": "IL Website", "website inbound": "IL Website",
                "surge": "IL Surge", "app": "Learn App"}
 _augd = _aug.copy()
-_augd["_bk"] = [_aug_bucket(c, p) for c, p in zip(_augd["cls"], _augd["p"])]
+# The 14-18 Aug export is a Sales Punch In activity report with no (Original Source, Updated Lead
+# Source) pair, so sale_class above cannot speak for its rows - they would all fail the organic
+# origin gate and pile into Rolling. merge_newsales.py buckets them by LEAD CREATION DATE instead
+# (created in August -> cohort, earlier -> rolling) and drops the result here. Keyed on p0, the
+# Lead Link id as written, because the phone fallback may have reassigned p. Only these leads are
+# overridden; the 59 rows already signed off keep the source-based rule untouched.
+_bkfile = os.path.join(DATA, "_aug_creation_buckets.json")
+_CRE_BK = {}
+if os.path.exists(_bkfile):
+    _CRE_BK = {k: int(v) for k, v in json.load(open(_bkfile)).items()}
+_augd["_bk"] = [int(_CRE_BK[p0_]) if p0_ in _CRE_BK else _aug_bucket(c, p)
+                for c, p, p0_ in zip(_augd["cls"], _augd["p"], _augd["p0"])]
+if _CRE_BK:
+    _hit = sum(1 for x in _augd["p0"] if x in _CRE_BK)
+    _coh = sum(1 for x in _augd["p0"] if _CRE_BK.get(x) == 1)
+    print(f"  {_hit} August sale(s) bucketed by lead creation date instead of source "
+          f"({_coh} cohort, {_hit - _coh} rolling)")
 _augd["_sd"] = [ORIG_TO_SRC.get(_norm_src(v), "Other") for v in _augd["Original Source"]]
 _augd["_gd"] = [norm_grade(v) for v in _augd.get("Select Standard", pd.Series(index=_augd.index))]
 _augd["_st"] = [norm_state(v) or "Blank/Unknown" for v in _augd["State"]]
