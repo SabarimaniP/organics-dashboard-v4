@@ -119,6 +119,54 @@ print("\n  source mapping applied:")
 for k, v in pd.Series([SRC_TO_BARE.get(nz(v), f"{v} (-> Other)") for v in n["Lead Source"]]).value_counts().items():
     print(f"    {k:<26} {v}")
 
+# ---------------------------------------------------------------- dashboard source dimension
+# Four rows carry a non-organic Lead Source (WhatsApp Chat, InMobious Leads, Performance
+# Marketing). Left alone those fall into a phantom source "Other" that no LEAD ever occupies -
+# every one of the 83k leads is IL Website / Learn App / IL Surge - so the funnel showed 0 leads
+# against 4 sales. Resolve the channel in order of authority instead:
+#
+#   1. the lead's OWN Lead Source from the leads export   (independently confirms 3 of the 4)
+#   2. the csv's Lead Source.1, which is organic on every row
+#   3. the csv's Lead Source
+#
+# This is carried in the sidecar rather than written into Original Source, so sale_class, the
+# weekly views and the audit trail of what the sheet actually said all stay untouched.
+def _dash_src(v):
+    s = str(v or "").lower()
+    if "learn" in s:   return "Learn App"
+    if "surge" in s:   return "IL Surge"
+    if "website" in s: return "IL Website"
+    return "Other"
+
+
+_L = pd.read_excel(os.path.join(MERGED, "Created in Mar to Aug.xlsx"),
+                   usecols=["Prospect ID", "Lead Source"])
+_lsrc = _L.assign(_k=pid(_L["Prospect ID"])).drop_duplicates("_k").set_index("_k")["Lead Source"]
+
+resolved, origin_of = {}, {}
+for _, r in n.iterrows():
+    for cand, lab in ((_lsrc.get(r["_k"]), "lead export"),
+                      (r.get("Lead Source.1"), "Lead Source.1"),
+                      (r.get("Lead Source"), "Lead Source")):
+        g = _dash_src(cand)
+        if g != "Other":
+            resolved[r["_k"]] = g
+            origin_of[r["_k"]] = lab
+            break
+    else:
+        resolved[r["_k"]] = "Other"
+        origin_of[r["_k"]] = "unresolved"
+
+print("\n  dashboard source resolved to:")
+for k, v in pd.Series(list(resolved.values())).value_counts().items():
+    print(f"    {k:<26} {v}")
+print("  resolved from:")
+for k, v in pd.Series(list(origin_of.values())).value_counts().items():
+    print(f"    {k:<26} {v}")
+_still = sum(1 for v in resolved.values() if v == "Other")
+print(f"  sales still falling into 'Other': {_still}"
+      + ("  <- none, the phantom source is gone" if _still == 0 else "  !! check these"))
+
 # ---------------------------------------------------------------- write
 shutil.copy2(SM, SM.replace(".xlsx", "_pre_newsales.xlsx"))
 merged = pd.concat([sm, out], ignore_index=True)
@@ -135,6 +183,7 @@ json.dump(new_keys, open(kf, "w"))
 print(f"  _aug_sale_keys.json {len(old_keys)} -> {len(new_keys)} keys")
 
 bf = os.path.join(MERGED, "_aug_creation_buckets.json")
-json.dump({k: int(b) for k, b in zip(n["_k"], n["_bk"])}, open(bf, "w"))
-print(f"  _aug_creation_buckets.json written with {len(n)} lead -> bucket entries")
+json.dump({k: {"bk": int(b), "src": resolved[k]} for k, b in zip(n["_k"], n["_bk"])},
+          open(bf, "w"))
+print(f"  _aug_creation_buckets.json written with {len(n)} lead -> bucket + source entries")
 print("=" * W)

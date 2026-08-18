@@ -309,9 +309,15 @@ _augd = _aug.copy()
 # Lead Link id as written, because the phone fallback may have reassigned p. Only these leads are
 # overridden; the 59 rows already signed off keep the source-based rule untouched.
 _bkfile = os.path.join(DATA, "_aug_creation_buckets.json")
-_CRE_BK = {}
+_CRE_BK, _CRE_SRC = {}, {}
 if os.path.exists(_bkfile):
-    _CRE_BK = {k: int(v) for k, v in json.load(open(_bkfile)).items()}
+    # {pid: {"bk": n, "src": "IL Website"}}; a bare int is the older format
+    for _k, _v in json.load(open(_bkfile)).items():
+        if isinstance(_v, dict):
+            _CRE_BK[_k] = int(_v["bk"])
+            if _v.get("src"): _CRE_SRC[_k] = _v["src"]
+        else:
+            _CRE_BK[_k] = int(_v)
 _augd["_bk"] = [int(_CRE_BK[p0_]) if p0_ in _CRE_BK else _aug_bucket(c, p)
                 for c, p, p0_ in zip(_augd["cls"], _augd["p"], _augd["p0"])]
 if _CRE_BK:
@@ -319,7 +325,12 @@ if _CRE_BK:
     _coh = sum(1 for x in _augd["p0"] if _CRE_BK.get(x) == 1)
     print(f"  {_hit} August sale(s) bucketed by lead creation date instead of source "
           f"({_coh} cohort, {_hit - _coh} rolling)")
-_augd["_sd"] = [ORIG_TO_SRC.get(_norm_src(v), "Other") for v in _augd["Original Source"]]
+# The new-export rows have no Original Source, so merge_newsales.py resolves their channel from
+# the lead's own record (falling back to the csv's Lead Source.1) and passes it in the sidecar.
+# Without this they land in a phantom source "Other" that no lead ever occupies, and the funnel
+# reads 0 leads against 4 sales. Every other row still comes from Original Source as before.
+_augd["_sd"] = [_CRE_SRC.get(p0_) or ORIG_TO_SRC.get(_norm_src(v), "Other")
+                for p0_, v in zip(_augd["p0"], _augd["Original Source"])]
 _augd["_gd"] = [norm_grade(v) for v in _augd.get("Select Standard", pd.Series(index=_augd.index))]
 _augd["_st"] = [norm_state(v) or "Blank/Unknown" for v in _augd["State"]]
 _unmapped = int((_augd["_sd"] == "Other").sum())
