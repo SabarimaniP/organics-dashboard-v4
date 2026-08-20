@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Fold "Sales from 14 - 18.csv" into the sales master.
+# Fold the latest "Sales from ..." export into the sales master.
 #
 # This export is a different report from the sheets used before: it is a Sales Punch In ACTIVITY
 # export, so it has Prospect Id / Lead Source / Grade and NOT Lead Link / Original Source /
@@ -16,13 +16,12 @@
 #
 # Dedupe is on the lead, matching the rest of the pipeline (one sale per lead; the 244-row master
 # holds 244 distinct leads). A lead already in the master is skipped, and a lead appearing twice
-# inside the CSV is kept once at its EARLIEST sale date.
+# inside the export is kept once at its EARLIEST sale date.
 import pandas as pd, os, json, shutil, sys, re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MERGED = os.path.join(HERE, "_merged")
 TOPUP = r"E:\Organics Numbers Update\August Data for Dashboard Update"
-CSV = os.path.join(TOPUP, "Sales from 14 - 18.csv")
 F_SM = "Original Sales May, June, July.xlsx"
 SM = os.path.join(MERGED, F_SM)
 AUG1 = pd.Timestamp("2026-08-01")
@@ -30,11 +29,27 @@ AUG1 = pd.Timestamp("2026-08-01")
 pid = lambda s: s.astype(str).str.strip().str.lower()
 W = 96
 print("=" * W); print("FOLDING IN THE NEW SALES EXPORT"); print("=" * W)
-print(f"  source: {os.path.basename(CSV)}")
 
-n = pd.read_csv(CSV, encoding="utf-8-sig", dtype=str)
+
+def find_src():
+    """newest 'Sales from ...' export, csv or xlsx. Each round ships a wider window under a new
+    name (14-18.csv, then 14-20.xlsx), so discover it rather than hardcoding the filename."""
+    import glob
+    hits = [f for f in glob.glob(os.path.join(TOPUP, "*"))
+            if os.path.splitext(f)[1].lower() in (".csv", ".xlsx")
+            and "sales from" in os.path.basename(f).lower()
+            and not os.path.basename(f).startswith("~$")]
+    if not hits:
+        sys.exit(f"no 'Sales from ...' export found in {TOPUP}")
+    return max(hits, key=os.path.getmtime)
+
+
+SRC = find_src()
+print(f"  source: {os.path.basename(SRC)}")
+n = (pd.read_csv(SRC, encoding="utf-8-sig", dtype=str) if SRC.lower().endswith(".csv")
+     else pd.read_excel(SRC, sheet_name=0, dtype=str))
 sm = pd.read_excel(SM)
-print(f"  csv rows {len(n)}   master rows {len(sm)}   master cols {len(sm.columns)}")
+print(f"  export rows {len(n)}   master rows {len(sm)}   master cols {len(sm.columns)}")
 
 # ---------------------------------------------------------------- keys and dates
 n["_k"] = pid(n["Prospect Id"])
@@ -55,10 +70,10 @@ n = n[~n["_k"].isin(sm_k)]
 n = n.sort_values("_sale")
 dup = n[n["_k"].duplicated(keep=False)]
 for k, g in dup.groupby("_k"):
-    print(f"  same lead twice in the csv: {g['Lead Name'].iloc[0]}  "
+    print(f"  same lead twice in the export: {g['Lead Name'].iloc[0]}  "
           f"{', '.join(f'{d:%d %b}' for d in g['_sale'])}  -> keeping earliest ({g['_sale'].min():%d %b})")
 n = n.drop_duplicates("_k", keep="first")
-print(f"  {before} csv rows -> {len(n)} new sales "
+print(f"  {before} export rows -> {len(n)} new sales "
       f"(-{len(already)} already in master, -{len(dup) - dup['_k'].nunique() if len(dup) else 0} duplicate)")
 
 # ---------------------------------------------------------------- bucket from creation date
@@ -109,7 +124,7 @@ for master_col, csv_col, conv in (
     if csv_col in n.columns:
         put(master_col, conv(n[csv_col]))
     else:
-        print(f"  !! csv has no {csv_col!r} - {master_col!r} left blank")
+        print(f"  !! export has no {csv_col!r} - {master_col!r} left blank")
 
 _rev = money(n["Enter Sale value Collected Rev"])
 print(f"\n  collected revenue on the new rows: {int(_rev.notna().sum())}/{len(n)} priced, "
