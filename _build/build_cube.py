@@ -37,14 +37,16 @@ dt  = lambda s: pd.to_datetime(s, errors="coerce", dayfirst=True)
 pid = lambda s: s.astype(str).str.strip().str.lower()
 
 # ---------------------------------------------------------------- 1. time
-W1, NW = pd.Timestamp("2026-05-04"), 16   # Aug 1-20 top-up: activity reaches 19 Aug, so W16 (17-23 Aug) opens
+W1, NW = pd.Timestamp("2026-05-04"), 16   # W16 = 17-23 Aug; NW stays 16 while the cap sits inside it
 # Everything is capped at the end of the last complete day of data. Leads created after the cap have
 # had no chance to be called, and counting them would understate the newest week's rates.
-CAP = pd.Timestamp("2026-08-19 23:59:59")   # Aug 1-20 top-up: 19 Aug is the last COMPLETE activity day
-# (3,758 calls, 41 booked, 19 conducted, sales to 23:04); 20 Aug stops at ~11am with 83 calls.
-# W16 is therefore a 3-of-7-day partial week, and two of those three days were non-working:
-# Mondays are the team's off day all month (3 Aug = 3 calls, 10 Aug = 26, 17 Aug = 1) and Tue 18 Aug
-# lost its day entirely at 12 calls, which 19 Aug then absorbed at 2.09x the daily mean.
+CAP = pd.Timestamp("2026-08-20 23:59:59")   # Aug 1-21 top-up: 20 Aug is the last COMPLETE activity day
+# (2,422 calls = 1.32x the 1,841 working-day mean, 30 booked, 6 conducted, sales to 20:52);
+# 21 Aug stops at ~10:48 with 91 calls and is dropped.
+# W16 is now 4 of 7 days, and TWO of those four were non-working - this is real, not a data fault:
+# Mondays are the team's off day all month (3 Aug = 3 calls, 10 Aug = 26, 17 Aug = 1), and Tue
+# 18 Aug lost its day at 12 calls, which Wed 19 Aug absorbed at 2.04x the mean. Read W16's totals,
+# not its per-day rates.
 WEND = W1 + pd.Timedelta(days=7 * NW - 1)
 WEEKS = []
 for i in range(NW):
